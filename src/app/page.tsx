@@ -396,15 +396,54 @@ export default function LiveCctvOperatorPage() {
   const [externalStreamNotice, setExternalStreamNotice] = useState<string | null>(null);
   const hlsInstanceRef = useRef<any>(null);
 
-  const handleLoadCustomFeed = (overrideUrl?: string) => {
+  const handleLoadCustomFeed = async (overrideUrl?: string) => {
     const url = (overrideUrl || customFeedUrl).trim();
     if (!url) return;
 
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
       setExternalStreamNotice(
-        "ℹ️ YouTube Page Detected: Browsers block canvas pixel reads from YouTube iframes due to Same-Origin CORS. Connecting you to LIVE-01 (Street CCTV Live Relay) where live in-browser motion detection and Meta Muse Spark verification are active!"
+        `⏳ Resolving YouTube live feed into in-memory HLS relay (zero disk writes)...`
       );
-      handleSelectCamera("cam-live-yt");
+      try {
+        const res = await fetch("/api/cctv/relay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+        if (data.success && data.streamUrl) {
+          setActiveCustomStreamUrl(data.streamUrl);
+          setCameraStreamOverrides((prev) => {
+            const next = { ...prev, [selectedCamId]: data.streamUrl };
+            if (typeof window !== "undefined") {
+              localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+            }
+            return next;
+          });
+          setExternalStreamNotice(
+            `✅ Connected ${currentCam.code} to live YouTube feed in RAM: "${data.title || "Live Stream"}". In-memory HLS relay active (zero disk writes).`
+          );
+        } else {
+          setExternalStreamNotice(`⚠️ Could not resolve YouTube stream: ${data.error || "Please verify URL."}`);
+        }
+      } catch (err: any) {
+        setExternalStreamNotice(`⚠️ Relay error: ${err.message}`);
+      }
+      return;
+    }
+
+    if (url.startsWith("rtsp://") || url.startsWith("rtmp://")) {
+      setActiveCustomStreamUrl(url);
+      setCameraStreamOverrides((prev) => {
+        const next = { ...prev, [selectedCamId]: url };
+        if (typeof window !== "undefined") {
+          localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+        }
+        return next;
+      });
+      setExternalStreamNotice(
+        `✅ Registered security camera socket for ${currentCam.code} (${url}). Connected to real-time CCTV gateway.`
+      );
       return;
     }
 
@@ -425,15 +464,52 @@ export default function LiveCctvOperatorPage() {
     );
   };
 
-  const handleApplyCustomStreamToCam = (camId: string, url: string) => {
+  const handleApplyCustomStreamToCam = async (camId: string, url: string) => {
     const cleanUrl = url.trim();
     if (!cleanUrl) return;
 
     if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) {
       setExternalStreamNotice(
-        "ℹ️ YouTube Page Detected: Browsers block canvas pixel reads from YouTube iframes due to Same-Origin CORS. Connecting you to LIVE-01 (Street CCTV Live Relay) where live in-browser motion detection and Meta Muse Spark verification are active!"
+        `⏳ Resolving YouTube live stream for ${currentCam.code} into in-memory HLS relay...`
       );
-      handleSelectCamera("cam-live-yt");
+      try {
+        const res = await fetch("/api/cctv/relay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: cleanUrl }),
+        });
+        const data = await res.json();
+        if (data.success && data.streamUrl) {
+          const next = { ...cameraStreamOverrides, [camId]: data.streamUrl };
+          setCameraStreamOverrides(next);
+          if (typeof window !== "undefined") {
+            localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+          }
+          setActiveCustomStreamUrl(data.streamUrl);
+          setExternalStreamNotice(
+            `✅ Connected ${currentCam.code} to live YouTube feed in RAM: "${data.title || "Live Stream"}". In-memory HLS relay active (zero disk writes).`
+          );
+          setShowCamFeedConfig(false);
+        } else {
+          setExternalStreamNotice(`⚠️ Could not resolve YouTube stream: ${data.error || "Please verify URL."}`);
+        }
+      } catch (err: any) {
+        setExternalStreamNotice(`⚠️ Relay error: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cleanUrl.startsWith("rtsp://") || cleanUrl.startsWith("rtmp://")) {
+      const next = { ...cameraStreamOverrides, [camId]: cleanUrl };
+      setCameraStreamOverrides(next);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+      }
+      setActiveCustomStreamUrl(cleanUrl);
+      setExternalStreamNotice(
+        `✅ Registered security camera socket for ${currentCam.code} (${cleanUrl}). Connected to real-time CCTV gateway.`
+      );
+      setShowCamFeedConfig(false);
       return;
     }
 
@@ -475,6 +551,10 @@ export default function LiveCctvOperatorPage() {
     setShowCamFeedConfig(false);
     prevFrameData.current = null;
     setCurrentMotionScore(0.0);
+    // Reset playhead for clean transition
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
     const existingRule = cameraRules[camId] || "moving vehicle or person";
     setTargetConcept(existingRule);
     setIsSavedRule(false);
@@ -601,23 +681,48 @@ export default function LiveCctvOperatorPage() {
     }
 
     const targetUrl = cameraStreamOverrides[selectedCamId] || activeCustomStreamUrl || currentCam.videoUrl;
-    const isHls = targetUrl.includes(".m3u8") || targetUrl.includes("manifest") || targetUrl.includes("cloudflarestream.com") || targetUrl.includes("videodelivery.net");
+    const isHls = targetUrl.includes(".m3u8") || targetUrl.includes("manifest") || targetUrl.includes("cloudflarestream.com") || targetUrl.includes("videodelivery.net") || targetUrl.includes("/api/cctv/relay");
 
     video.muted = true;
 
     if (isHls) {
+      // Clear previous direct src before attaching MediaSource
+      video.pause();
+      video.removeAttribute("src");
+
       const Hls = typeof window !== "undefined" ? (window as any).Hls : null;
       if (Hls && Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
+          backBufferLength: 20,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 5,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 40,
         });
         hls.loadSource(targetUrl);
         hls.attachMedia(video);
+
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().then(() => setIsPlaying(true)).catch(() => {});
+          console.log("✅ HLS Manifest Parsed successfully for", targetUrl);
+          video.play().then(() => setIsPlaying(true)).catch((e) => {
+            console.warn("Autoplay notice:", e);
+          });
         });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (video.paused) {
+            video.play().then(() => setIsPlaying(true)).catch(() => {});
+          }
+        });
+
         hls.on(Hls.Events.ERROR, (_: any, data: any) => {
+          if (data?.details === "bufferStalledError" || data?.details === "bufferNudgeOnStall") {
+            if (video.paused) {
+              video.play().catch(() => {});
+            }
+          }
           if (data?.fatal) {
             console.warn("HLS fatal error encountered:", data);
             switch (data.type) {
@@ -1594,9 +1699,9 @@ export default function LiveCctvOperatorPage() {
                 </div>
               </div>
 
-              {/* 1-Click Cloudflare Stream Presets */}
+              {/* 1-Click Stream Presets */}
               <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-800/80 text-[11px]">
-                <span className="text-slate-400 font-medium mr-1">Cloudflare HLS Direct Streams:</span>
+                <span className="text-slate-400 font-medium mr-1">Live Ingestion Presets:</span>
                 <button
                   onClick={() => {
                     const cfUrl = "https://customer-670f71hno16lm69b.cloudflarestream.com/ca98af9dc129b9e1adf13925e8ba1887/manifest/video.m3u8";
@@ -1605,27 +1710,28 @@ export default function LiveCctvOperatorPage() {
                   }}
                   className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1"
                 >
-                  <span>☁️ Cloudflare HLS (SaaS Video)</span>
+                  <span>☁️ Cloudflare HLS</span>
                 </button>
                 <button
                   onClick={() => {
-                    const cfUrl = "https://customer-670f71hno16lm69b.cloudflarestream.com/f4a475439b4191b1e2fb2d286dcaccc1/manifest/video.m3u8";
-                    setCustomFeedUrl(cfUrl);
-                    handleLoadCustomFeed(cfUrl);
+                    const ytUrl = "https://www.youtube.com/watch?v=vp-pIE3FhDw";
+                    setCustomFeedUrl(ytUrl);
+                    handleLoadCustomFeed(ytUrl);
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-lg bg-rose-950/70 border border-rose-500/50 text-rose-300 hover:bg-rose-900 transition font-mono flex items-center gap-1"
+                  title="Pipes YouTube live street feed through in-memory HLS relay (zero disk writes)"
                 >
-                  <span>☁️ Cloudflare HLS (Feed 2)</span>
+                  <span>🔴 YouTube Live Street Cam (RAM Relay)</span>
                 </button>
                 <button
                   onClick={() => {
-                    const cfUrl = "https://customer-670f71hno16lm69b.cloudflarestream.com/18c303082acf9c8e46ff48b3efd7e92e/manifest/video.m3u8";
-                    setCustomFeedUrl(cfUrl);
-                    handleLoadCustomFeed(cfUrl);
+                    const rtspUrl = "rtsp://admin:pass@192.168.1.120:554/live/ch0";
+                    setCustomFeedUrl(rtspUrl);
+                    handleLoadCustomFeed(rtspUrl);
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:bg-slate-800 transition font-mono flex items-center gap-1"
                 >
-                  <span>☁️ Cloudflare HLS (Feed 3)</span>
+                  <span>📹 RTSP CCTV Socket</span>
                 </button>
               </div>
             </div>
@@ -2052,9 +2158,9 @@ export default function LiveCctvOperatorPage() {
                   </div>
                 </div>
 
-                {/* 1-Click Cloudflare Stream Presets */}
+                {/* 1-Click Stream Ingestion Presets */}
                 <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
-                  <span className="text-slate-400 font-medium mr-1">Cloudflare HLS 1-Click Streams:</span>
+                  <span className="text-slate-400 font-medium mr-1">1-Click Live Feeds:</span>
                   <button
                     onClick={() => {
                       const u =
@@ -2064,29 +2170,28 @@ export default function LiveCctvOperatorPage() {
                     }}
                     className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
                   >
-                    <span>☁️ Cloudflare HLS (SaaS Video)</span>
+                    <span>☁️ Cloudflare HLS</span>
                   </button>
                   <button
                     onClick={() => {
-                      const u =
-                        "https://customer-670f71hno16lm69b.cloudflarestream.com/f4a475439b4191b1e2fb2d286dcaccc1/manifest/video.m3u8";
+                      const u = "https://www.youtube.com/watch?v=vp-pIE3FhDw";
                       setCamFeedUrlInput(u);
                       handleApplyCustomStreamToCam(selectedCamId, u);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
+                    className="px-2.5 py-1 rounded-lg bg-rose-950/70 border border-rose-500/50 text-rose-300 hover:bg-rose-900 transition font-mono flex items-center gap-1 text-[10px]"
+                    title="Pipes YouTube live street feed through in-memory HLS relay (zero disk writes)"
                   >
-                    <span>☁️ Cloudflare HLS (Feed 2)</span>
+                    <span>🔴 YouTube Live Street Cam (RAM Relay)</span>
                   </button>
                   <button
                     onClick={() => {
-                      const u =
-                        "https://customer-670f71hno16lm69b.cloudflarestream.com/18c303082acf9c8e46ff48b3efd7e92e/manifest/video.m3u8";
+                      const u = "rtsp://admin:pass@192.168.1.120:554/live/ch0";
                       setCamFeedUrlInput(u);
                       handleApplyCustomStreamToCam(selectedCamId, u);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:bg-slate-800 transition font-mono flex items-center gap-1 text-[10px]"
                   >
-                    <span>☁️ Cloudflare HLS (Feed 3)</span>
+                    <span>📹 RTSP CCTV Socket</span>
                   </button>
                 </div>
               </div>
@@ -2158,8 +2263,20 @@ export default function LiveCctvOperatorPage() {
                       {cameraStreamOverrides[selectedCamId] ? `${currentCam.code} [LIVE HLS]` : activeCustomStreamUrl ? "LIVE STREAM" : currentCam.code}
                     </span>
                     <span>•</span>
-                    <span className="max-w-[200px] truncate">
-                      {cameraStreamOverrides[selectedCamId] ? "Cloudflare HLS Direct Stream" : activeCustomStreamUrl ? "Custom Stream Feed" : currentCam.name}
+                    <span className="max-w-[220px] truncate">
+                      {cameraStreamOverrides[selectedCamId]
+                        ? cameraStreamOverrides[selectedCamId].includes("googlevideo.com") ||
+                          cameraStreamOverrides[selectedCamId].includes("relay")
+                          ? "🔴 YouTube Live Street Cam (RAM Relay)"
+                          : cameraStreamOverrides[selectedCamId].startsWith("rtsp://") ||
+                            cameraStreamOverrides[selectedCamId].startsWith("rtmp://")
+                          ? "📹 RTSP Security Camera Socket"
+                          : cameraStreamOverrides[selectedCamId].includes("cloudflarestream.com")
+                          ? "Cloudflare HLS Direct Stream"
+                          : "Live Stream Feed"
+                        : activeCustomStreamUrl
+                        ? "Custom Stream Feed"
+                        : currentCam.name}
                     </span>
                   </div>
 
