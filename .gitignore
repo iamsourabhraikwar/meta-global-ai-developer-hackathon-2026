@@ -1,0 +1,33 @@
+# Node dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Next.js Build Output
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Sensitive credentials & environment variables (DO NOT COMMIT)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database local runtime captures & events
+data/*.json
+
+# Large surveillance footage files (>100MB exceeds GitHub push limit)
+public/cctv/**/*.mp4
+public/cctv/*.mp4
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# OS generated files
+.DS_Store
+Thumbs.db
