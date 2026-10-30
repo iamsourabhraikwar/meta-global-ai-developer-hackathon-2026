@@ -54,7 +54,9 @@ export default function WelcomeSetupWizard({
   const [waPhoneId, setWaPhoneId] = useState<string>(initialConfig?.whatsAppPhoneNumberId || "");
   const [waToken, setWaToken] = useState<string>(initialConfig?.whatsAppAccessToken || "");
   const [waRecipient, setWaRecipient] = useState<string>(
-    initialConfig?.whatsAppRecipient || ""
+    initialConfig?.whatsAppRecipient && !initialConfig.whatsAppRecipient.includes("@")
+      ? initialConfig.whatsAppRecipient
+      : "15550192834"
   );
   const [waMode, setWaMode] = useState<string>("full_reasoning");
 
@@ -551,12 +553,13 @@ export default function WelcomeSetupWizard({
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 font-mono block mb-1">
-                      RECIPIENT NUMBER:
+                      RECIPIENT PHONE (DEMO: 15550192834):
                     </label>
                     <input
                       type="text"
                       value={waRecipient}
-                      onChange={(e) => setWaRecipient(e.target.value)}
+                      onChange={(e) => setWaRecipient(e.target.value.replace(/[^0-9+]/g, ""))}
+                      placeholder="e.g. 15550192834 (numbers only)"
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-white font-mono"
                     />
                   </div>

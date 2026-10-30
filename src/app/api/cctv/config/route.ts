@@ -10,6 +10,9 @@ export async function GET() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const data = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      if (data.whatsAppRecipient && data.whatsAppRecipient.includes("@")) {
+        data.whatsAppRecipient = "15550192834";
+      }
       return NextResponse.json({ success: true, config: data });
     }
     // Default config from environment
@@ -43,9 +46,14 @@ export async function POST(req: NextRequest) {
       ? JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"))
       : {};
 
+    const sanitizedBody = { ...body };
+    if (sanitizedBody.whatsAppRecipient && sanitizedBody.whatsAppRecipient.includes("@")) {
+      sanitizedBody.whatsAppRecipient = "15550192834";
+    }
+
     const updatedConfig = {
       ...currentConfig,
-      ...body,
+      ...sanitizedBody,
       updatedAt: new Date().toISOString(),
       hasCompletedSetup: true,
     };

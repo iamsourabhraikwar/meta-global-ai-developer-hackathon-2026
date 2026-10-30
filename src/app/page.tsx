@@ -34,6 +34,7 @@ import {
   Settings,
 } from "lucide-react";
 import WelcomeSetupWizard from "@/components/WelcomeSetupWizard";
+import AddPresetModal from "@/components/AddPresetModal";
 
 interface ChatMessage {
   id: string;
@@ -204,6 +205,7 @@ export default function LiveCctvOperatorPage() {
     "person touching parked car",
   ]);
   const [showAddPreset, setShowAddPreset] = useState<boolean>(false);
+  const [showAddPresetModal, setShowAddPresetModal] = useState<boolean>(false);
   const [newPresetText, setNewPresetText] = useState<string>("");
 
   const handleDeletePreset = (presetToDelete: string) => {
@@ -265,12 +267,44 @@ export default function LiveCctvOperatorPage() {
     return null;
   };
 
-  // WhatsApp Alert Configuration State
-  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("");
+  // WhatsApp Alert Configuration State (Demo Number: 15550192834)
+  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("15550192834");
   const [whatsAppMode, setWhatsAppMode] = useState<"full_reasoning" | "summary_only" | "image_only">("full_reasoning");
   const [showWhatsAppSettings, setShowWhatsAppSettings] = useState<boolean>(false);
   const [whatsAppTestStatus, setWhatsAppTestStatus] = useState<string | null>(null);
   const [isSendingWhatsAppTest, setIsSendingWhatsAppTest] = useState<boolean>(false);
+
+  // Per-Camera Custom Stream Overrides (e.g. { "cam-01": "https://...manifest/video.m3u8" })
+  const [cameraStreamOverrides, setCameraStreamOverrides] = useState<Record<string, string>>({});
+  const [showCamFeedConfig, setShowCamFeedConfig] = useState<boolean>(false);
+  const [camFeedUrlInput, setCamFeedUrlInput] = useState<string>("");
+
+  useEffect(() => {
+    // Load persisted camera stream overrides
+    if (typeof window !== "undefined") {
+      try {
+        const savedOverrides = localStorage.getItem("cctv_camera_stream_overrides");
+        if (savedOverrides) {
+          setCameraStreamOverrides(JSON.parse(savedOverrides));
+        }
+      } catch (e) {}
+    }
+
+    // Load persisted operator configuration
+    fetch("/api/cctv/config")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res?.config?.whatsAppRecipient) {
+          const raw = res.config.whatsAppRecipient;
+          if (raw && !raw.includes("@")) {
+            setWhatsAppRecipient(raw);
+          } else {
+            setWhatsAppRecipient("15550192834");
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleTestWhatsAppDispatch = async () => {
     setIsSendingWhatsAppTest(true);
@@ -376,17 +410,69 @@ export default function LiveCctvOperatorPage() {
 
     const isHls = url.includes(".m3u8") || url.includes("manifest") || url.includes("cloudflarestream.com") || url.includes("videodelivery.net");
     setActiveCustomStreamUrl(url);
+    // Also save to current camera override
+    setCameraStreamOverrides((prev) => {
+      const next = { ...prev, [selectedCamId]: url };
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+      }
+      return next;
+    });
     setExternalStreamNotice(
       isHls
-        ? `✅ Connected to Cloudflare HLS Direct Stream! Real-time Hls.js demuxer active.`
-        : `✅ Loaded external direct video stream: ${url}`
+        ? `✅ Connected ${currentCam.code} to Cloudflare HLS Direct Stream! Real-time Hls.js demuxer active.`
+        : `✅ Loaded external direct video stream on ${currentCam.code}: ${url}`
     );
+  };
+
+  const handleApplyCustomStreamToCam = (camId: string, url: string) => {
+    const cleanUrl = url.trim();
+    if (!cleanUrl) return;
+
+    if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) {
+      setExternalStreamNotice(
+        "ℹ️ YouTube Page Detected: Browsers block canvas pixel reads from YouTube iframes due to Same-Origin CORS. Connecting you to LIVE-01 (Street CCTV Live Relay) where live in-browser motion detection and Meta Muse Spark verification are active!"
+      );
+      handleSelectCamera("cam-live-yt");
+      return;
+    }
+
+    setCameraStreamOverrides((prev) => {
+      const next = { ...prev, [camId]: cleanUrl };
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+      }
+      return next;
+    });
+    setActiveCustomStreamUrl(cleanUrl);
+    setExternalStreamNotice(
+      `✅ Connected ${currentCam.code} to live stream: ${cleanUrl.slice(0, 60)}...`
+    );
+    setShowCamFeedConfig(false);
+  };
+
+  const handleResetCamToPreloaded = (camId: string) => {
+    setCameraStreamOverrides((prev) => {
+      const next = { ...prev };
+      delete next[camId];
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
+      }
+      return next;
+    });
+    setActiveCustomStreamUrl(null);
+    setCamFeedUrlInput("");
+    setExternalStreamNotice(`📁 Reverted ${currentCam.code} to preloaded benchmark video.`);
+    setShowCamFeedConfig(false);
   };
 
   // Sync target concept and auto-start video when camera changes
   const handleSelectCamera = (camId: string) => {
-    setActiveCustomStreamUrl(null); // Reset external stream on camera tab switch
     setSelectedCamId(camId);
+    const camStream = cameraStreamOverrides[camId] || null;
+    setActiveCustomStreamUrl(camStream);
+    setCamFeedUrlInput(camStream || "");
+    setShowCamFeedConfig(false);
     prevFrameData.current = null;
     setCurrentMotionScore(0.0);
     const existingRule = cameraRules[camId] || "moving vehicle or person";
@@ -514,7 +600,7 @@ export default function LiveCctvOperatorPage() {
       hlsInstanceRef.current = null;
     }
 
-    const targetUrl = activeCustomStreamUrl || currentCam.videoUrl;
+    const targetUrl = cameraStreamOverrides[selectedCamId] || activeCustomStreamUrl || currentCam.videoUrl;
     const isHls = targetUrl.includes(".m3u8") || targetUrl.includes("manifest") || targetUrl.includes("cloudflarestream.com") || targetUrl.includes("videodelivery.net");
 
     video.muted = true;
@@ -565,7 +651,7 @@ export default function LiveCctvOperatorPage() {
         hlsInstanceRef.current = null;
       }
     };
-  }, [activeCustomStreamUrl, selectedCamId, currentCam.videoUrl, currentCam.isLiveStream]);
+  }, [cameraStreamOverrides, activeCustomStreamUrl, selectedCamId, currentCam.videoUrl, currentCam.isLiveStream]);
 
   // Video Timeupdate
   const handleTimeUpdate = () => {
@@ -1302,7 +1388,9 @@ export default function LiveCctvOperatorPage() {
                 title="WhatsApp Alert Settings"
               >
                 <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{whatsAppRecipient ? `WhatsApp: +${whatsAppRecipient}` : "WhatsApp Alerts"}</span>
+                <span>
+                  WhatsApp: {whatsAppRecipient && !whatsAppRecipient.includes("@") ? `+${whatsAppRecipient.replace(/^\+/, "")}` : "+1 (555) 019-2834 (Demo)"}
+                </span>
               </button>
 
               {/* WhatsApp Dropdown Settings */}
@@ -1322,13 +1410,19 @@ export default function LiveCctvOperatorPage() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Recipient Number:</label>
+                    <label className="text-[10px] text-slate-400 block mb-1">
+                      Recipient Phone Number (Demo Default: +1 555-019-2834):
+                    </label>
                     <input
                       type="text"
                       value={whatsAppRecipient}
-                      onChange={(e) => setWhatsAppRecipient(e.target.value)}
+                      onChange={(e) => setWhatsAppRecipient(e.target.value.replace(/[^0-9+]/g, ""))}
+                      placeholder="e.g. 15550192834 (numbers only)"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
                     />
+                    <p className="text-[9px] text-slate-500 mt-0.5 italic">
+                      * Enter mobile phone with country code (numbers only, no emails).
+                    </p>
                   </div>
 
                   <div>
@@ -1405,6 +1499,7 @@ export default function LiveCctvOperatorPage() {
             {cameras.map((cam) => {
               const isSelected = cam.id === selectedCamId;
               const hasAlert = activeAlert?.cameraId === cam.id;
+              const hasCustomFeed = Boolean(cameraStreamOverrides[cam.id]);
               return (
                 <button
                   key={cam.id}
@@ -1417,7 +1512,9 @@ export default function LiveCctvOperatorPage() {
                 >
                   <span
                     className={`w-2 h-2 rounded-full ${
-                      cam.isLiveStream
+                      hasCustomFeed
+                        ? "bg-rose-400 animate-pulse-fast"
+                        : cam.isLiveStream
                         ? "bg-rose-400 animate-pulse-fast"
                         : hasAlert
                         ? "bg-rose-400 animate-ping"
@@ -1427,11 +1524,15 @@ export default function LiveCctvOperatorPage() {
                     }`}
                   />
                   <span>{cam.code}</span>
-                  {cam.id === "cam-live-yt" && (
+                  {hasCustomFeed ? (
+                    <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold border border-rose-400/40">
+                      LIVE HLS
+                    </span>
+                  ) : cam.id === "cam-live-yt" ? (
                     <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold border border-rose-400/40">
                       LIVE RELAY
                     </span>
-                  )}
+                  ) : null}
                 </button>
               );
             })}
@@ -1672,39 +1773,15 @@ export default function LiveCctvOperatorPage() {
                   </div>
                 ))}
 
-                {/* Add Custom Preset Inline Form */}
-                {showAddPreset ? (
-                  <div className="inline-flex items-center gap-1 bg-slate-950 border border-cyan-500/50 rounded-lg p-0.5">
-                    <input
-                      type="text"
-                      value={newPresetText}
-                      onChange={(e) => setNewPresetText(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleAddPreset()}
-                      placeholder="New target..."
-                      className="bg-transparent text-[10px] text-white px-2 py-0.5 focus:outline-none w-28 placeholder-slate-500 font-mono"
-                      autoFocus
-                    />
-                    <button
-                      onClick={handleAddPreset}
-                      className="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded text-[9px] font-bold"
-                    >
-                      Add
-                    </button>
-                    <button
-                      onClick={() => setShowAddPreset(false)}
-                      className="px-1 py-0.5 text-slate-400 hover:text-white text-[9px]"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowAddPreset(true)}
-                    className="text-[10px] px-2 py-1 rounded-lg border border-dashed border-slate-700 text-slate-400 hover:text-cyan-300 hover:border-cyan-500/40 transition"
-                  >
-                    + Add Preset
-                  </button>
-                )}
+                {/* Add Custom Preset Modal Button */}
+                <button
+                  onClick={() => setShowAddPresetModal(true)}
+                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg border border-dashed border-cyan-500/50 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 font-bold transition shadow-sm"
+                  title="Open AI Detection Preset Questionnaire Dialog"
+                >
+                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <span>+ Add Preset</span>
+                </button>
               </div>
 
               {/* Spatial Watch Zone Controls (Pencil, Box, Circle, Presets) */}
@@ -1875,6 +1952,147 @@ export default function LiveCctvOperatorPage() {
             </div>
           )}
 
+          {/* Active Camera Feed Source Bar & Live Stream Configuration */}
+          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-2xl flex flex-col gap-2 shadow-md">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px]">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      cameraStreamOverrides[selectedCamId]
+                        ? "bg-rose-400 animate-pulse-fast"
+                        : "bg-emerald-400"
+                    }`}
+                  />
+                  <span className="text-slate-400">Feed Source for {currentCam.code}:</span>
+                  <span
+                    className={
+                      cameraStreamOverrides[selectedCamId]
+                        ? "text-rose-300 font-bold"
+                        : "text-emerald-300 font-bold"
+                    }
+                  >
+                    {cameraStreamOverrides[selectedCamId]
+                      ? "🌐 Live HLS Stream Active"
+                      : "📁 Preloaded Benchmark CCTV"}
+                  </span>
+                </div>
+                {cameraStreamOverrides[selectedCamId] && (
+                  <span className="text-[10px] text-slate-500 font-mono hidden md:inline truncate max-w-[240px]">
+                    {cameraStreamOverrides[selectedCamId]}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {cameraStreamOverrides[selectedCamId] && (
+                  <button
+                    onClick={() => handleResetCamToPreloaded(selectedCamId)}
+                    className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-mono transition"
+                    title="Switch back to built-in benchmark video"
+                  >
+                    Reset to Preloaded Video
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowCamFeedConfig(!showCamFeedConfig)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl font-bold border transition text-[11px] ${
+                    showCamFeedConfig
+                      ? "bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/20"
+                      : "bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border-cyan-500/40"
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>
+                    {showCamFeedConfig ? "Close Feed Config" : `⚙️ Configure ${currentCam.code} Stream URL`}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Per-Camera Live Stream Configuration Drawer */}
+            {showCamFeedConfig && (
+              <div className="pt-2.5 border-t border-slate-800/80 flex flex-col gap-2.5 bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-white flex items-center gap-1.5">
+                    <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    Live Stream Ingestion for {currentCam.code} ({currentCam.name})
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    Paste Cloudflare HLS (.m3u8), direct MP4, or test stream URL
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <input
+                    type="text"
+                    value={camFeedUrlInput}
+                    onChange={(e) => setCamFeedUrlInput(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleApplyCustomStreamToCam(selectedCamId, camFeedUrlInput)
+                    }
+                    placeholder="https://...manifest/video.m3u8 or direct .mp4 stream URL"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono"
+                  />
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      onClick={() => handleApplyCustomStreamToCam(selectedCamId, camFeedUrlInput)}
+                      className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition whitespace-nowrap shadow-md shadow-cyan-500/20"
+                    >
+                      Apply to {currentCam.code}
+                    </button>
+                    {cameraStreamOverrides[selectedCamId] && (
+                      <button
+                        onClick={() => handleResetCamToPreloaded(selectedCamId)}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 1-Click Cloudflare Stream Presets */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
+                  <span className="text-slate-400 font-medium mr-1">Cloudflare HLS 1-Click Streams:</span>
+                  <button
+                    onClick={() => {
+                      const u =
+                        "https://customer-670f71hno16lm69b.cloudflarestream.com/ca98af9dc129b9e1adf13925e8ba1887/manifest/video.m3u8";
+                      setCamFeedUrlInput(u);
+                      handleApplyCustomStreamToCam(selectedCamId, u);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
+                  >
+                    <span>☁️ Cloudflare HLS (SaaS Video)</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const u =
+                        "https://customer-670f71hno16lm69b.cloudflarestream.com/f4a475439b4191b1e2fb2d286dcaccc1/manifest/video.m3u8";
+                      setCamFeedUrlInput(u);
+                      handleApplyCustomStreamToCam(selectedCamId, u);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
+                  >
+                    <span>☁️ Cloudflare HLS (Feed 2)</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const u =
+                        "https://customer-670f71hno16lm69b.cloudflarestream.com/18c303082acf9c8e46ff48b3efd7e92e/manifest/video.m3u8";
+                      setCamFeedUrlInput(u);
+                      handleApplyCustomStreamToCam(selectedCamId, u);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition font-mono flex items-center gap-1 text-[10px]"
+                  >
+                    <span>☁️ Cloudflare HLS (Feed 3)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Main Tactical Video Player Container */}
           <div className="relative bg-black rounded-2xl overflow-hidden aspect-video border border-slate-800 shadow-2xl flex items-center justify-center">
             {currentCam.isLiveStream ? (
@@ -1937,11 +2155,11 @@ export default function LiveCctvOperatorPage() {
                   <div className="flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-200">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-fast" />
                     <span className="font-bold text-cyan-400">
-                      {activeCustomStreamUrl ? "LIVE STREAM" : currentCam.code}
+                      {cameraStreamOverrides[selectedCamId] ? `${currentCam.code} [LIVE HLS]` : activeCustomStreamUrl ? "LIVE STREAM" : currentCam.code}
                     </span>
                     <span>•</span>
                     <span className="max-w-[200px] truncate">
-                      {activeCustomStreamUrl ? "Cloudflare HLS Feed" : currentCam.name}
+                      {cameraStreamOverrides[selectedCamId] ? "Cloudflare HLS Direct Stream" : activeCustomStreamUrl ? "Custom Stream Feed" : currentCam.name}
                     </span>
                   </div>
 
@@ -2453,6 +2671,27 @@ export default function LiveCctvOperatorPage() {
             setCustomFeedUrl(newConfig.customCamera.url);
             handleLoadCustomFeed(newConfig.customCamera.url);
           }
+        }}
+      />
+
+      {/* AI Detection Preset Builder Questionnaire Modal */}
+      <AddPresetModal
+        isOpen={showAddPresetModal}
+        onClose={() => setShowAddPresetModal(false)}
+        cameraCode={currentCam.code}
+        cameraName={currentCam.name}
+        onSavePreset={(newPreset) => {
+          if (!targetPresets.includes(newPreset.ruleText)) {
+            setTargetPresets((prev) => [newPreset.ruleText, ...prev]);
+          }
+          setTargetConcept(newPreset.ruleText);
+          if (newPreset.enableTextDetection) {
+            setIsTextDetectionActive(true);
+            if (newPreset.expectedText) {
+              setZoneOcrText(newPreset.expectedText);
+            }
+          }
+          handleSaveCameraRule(newPreset.ruleText);
         }}
       />
     </div>
