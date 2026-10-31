@@ -45,21 +45,21 @@ interface ChatMessage {
 }
 
 export default function LiveCctvOperatorPage() {
-  const [cameras] = useState<CameraConfig[]>(CAMERAS);
+  const [cameras, setCameras] = useState<CameraConfig[]>(CAMERAS);
   const [selectedCamId, setSelectedCamId] = useState<string>("cam-04");
 
   // Per-Camera Independent Trigger Rules Memory
   const [cameraRules, setCameraRules] = useState<Record<string, string>>({
     "cam-01": "blue delivery van entering gate",
-    "cam-02": "yellow forklift and pallet operator in loading bay",
-    "cam-03": "silver SUV and outbound traffic on exit ramp",
+    "cam-02": "cash drawer opened or hand reaching into register drawer to pick cash",
+    "cam-03": "customer waiting at empty table or dine and dash without paying",
     "cam-04": "children running behind trees along perimeter",
-    "cam-05": "dock worker and freight staging at bay 2",
-    "cam-06": "white sedan navigating underground parking",
-    "cam-07": "vehicle descending garage access ramp",
-    "cam-08": "forklift unloading goods truck",
-    "cam-09": "fully loaded forklift transit in safety corridor",
-    "cam-10": "cash drawer opened or transaction at checkout register counter",
+    "cam-05": "shoulder surfing intrusion or loitering near ATM keypad",
+    "cam-06": "wrong-way vehicle or pedestrian walking on vehicle ramp",
+    "cam-07": "unattended baggage or abandoned suitcase left by owner",
+    "cam-08": "worker in forklift transit path or worker down",
+    "cam-09": "porch pirate package theft or car door handle prowling in driveway",
+    "cam-10": "display glass reach-in or customer reaching behind showcase",
     "cam-11": "night vehicle moving across parking lot",
     "cam-12": "technician on electronics factory assembly line",
     "cam-13": "perimeter security patrol along boundary fence",
@@ -197,12 +197,16 @@ export default function LiveCctvOperatorPage() {
 
   // Dynamic Target Presets State (User can delete or add custom presets)
   const [targetPresets, setTargetPresets] = useState<string[]>([
-    "cash drawer opened or transaction at checkout register counter",
-    "children running behind trees",
-    "person interacting with tree on left",
+    "cash drawer opened or hand reaching into register drawer to pick cash",
+    "customer waiting at empty table or dine and dash without paying",
+    "porch pirate package theft or car door handle prowling in driveway",
+    "shoulder surfing intrusion or loitering near ATM keypad",
+    "wrong-way vehicle or pedestrian walking on vehicle ramp",
+    "unattended baggage or abandoned suitcase left by owner",
+    "worker in forklift transit path or worker down",
+    "children running behind trees along perimeter",
     "blue delivery van entering gate",
-    "yellow forklift and pallet operator",
-    "person touching parked car",
+    "display glass reach-in or customer reaching behind showcase",
   ]);
   const [showAddPreset, setShowAddPreset] = useState<boolean>(false);
   const [showAddPresetModal, setShowAddPresetModal] = useState<boolean>(false);
@@ -238,6 +242,9 @@ export default function LiveCctvOperatorPage() {
   const [isTextDetectionActive, setIsTextDetectionActive] = useState<boolean>(false);
   const [zoneOcrText, setZoneOcrText] = useState<string | null>(null);
   const [isScanningOcr, setIsScanningOcr] = useState<boolean>(false);
+
+  // Client-Side MediaPipe Hand & Pose Landmark Gating State (Cash Register Drawer, Reaching, Seated/Standing Postures)
+  const [isHandPoseGatingActive, setIsHandPoseGatingActive] = useState<boolean>(false);
 
   // Client-Side WebAssembly Text Detection (Runs fast OCR on optical crop with contrast preprocessing)
   const extractTextFromCrop = async (cropBase64: string): Promise<string | null> => {
@@ -396,9 +403,35 @@ export default function LiveCctvOperatorPage() {
   const [externalStreamNotice, setExternalStreamNotice] = useState<string | null>(null);
   const hlsInstanceRef = useRef<any>(null);
 
-  const handleLoadCustomFeed = async (overrideUrl?: string) => {
+  const handleLoadCustomFeed = async (overrideUrl?: string, asNewCamera: boolean = false) => {
     const url = (overrideUrl || customFeedUrl).trim();
     if (!url) return;
+
+    let targetCamId = selectedCamId;
+    let targetCamCode = currentCam.code;
+
+    if (asNewCamera) {
+      const nextIndex = cameras.length + 1;
+      const nextCode = `CAM-${String(nextIndex).padStart(2, "0")}`;
+      const nextId = `cam-${nextIndex}`;
+      targetCamId = nextId;
+      targetCamCode = nextCode;
+
+      const newCam: CameraConfig = {
+        id: nextId,
+        code: nextCode,
+        icon: url.includes("youtube") || url.includes("youtu.be") ? "🔴" : url.includes("cloudflare") ? "☁️" : "📡",
+        shortName: `Live Ingestion Feed`,
+        name: `External Live Stream (${nextCode})`,
+        location: "External Live Ingestion",
+        videoUrl: url,
+        resolution: "1920x1080 (HD)",
+        fps: 30,
+        status: "ONLINE",
+        defaultTarget: "moving vehicle or person",
+      };
+      setCameras((prev) => [...prev, newCam]);
+    }
 
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
       setExternalStreamNotice(
@@ -414,15 +447,19 @@ export default function LiveCctvOperatorPage() {
         if (data.success && data.streamUrl) {
           setActiveCustomStreamUrl(data.streamUrl);
           setCameraStreamOverrides((prev) => {
-            const next = { ...prev, [selectedCamId]: data.streamUrl };
+            const next = { ...prev, [targetCamId]: data.streamUrl };
             if (typeof window !== "undefined") {
               localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
             }
             return next;
           });
           setExternalStreamNotice(
-            `✅ Connected ${currentCam.code} to live YouTube feed in RAM: "${data.title || "Live Stream"}". In-memory HLS relay active (zero disk writes).`
+            `✅ Connected ${targetCamCode} to live YouTube feed in RAM: "${data.title || "Live Stream"}". In-memory HLS relay active (zero disk writes).`
           );
+          if (asNewCamera) {
+            handleSelectCamera(targetCamId);
+          }
+          setShowCustomFeedInput(false);
         } else {
           setExternalStreamNotice(`⚠️ Could not resolve YouTube stream: ${data.error || "Please verify URL."}`);
         }
@@ -435,15 +472,19 @@ export default function LiveCctvOperatorPage() {
     if (url.startsWith("rtsp://") || url.startsWith("rtmp://")) {
       setActiveCustomStreamUrl(url);
       setCameraStreamOverrides((prev) => {
-        const next = { ...prev, [selectedCamId]: url };
+        const next = { ...prev, [targetCamId]: url };
         if (typeof window !== "undefined") {
           localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
         }
         return next;
       });
       setExternalStreamNotice(
-        `✅ Registered security camera socket for ${currentCam.code} (${url}). Connected to real-time CCTV gateway.`
+        `✅ Registered security camera socket for ${targetCamCode} (${url}). Connected to real-time CCTV gateway.`
       );
+      if (asNewCamera) {
+        handleSelectCamera(targetCamId);
+      }
+      setShowCustomFeedInput(false);
       return;
     }
 
@@ -451,7 +492,7 @@ export default function LiveCctvOperatorPage() {
     setActiveCustomStreamUrl(url);
     // Also save to current camera override
     setCameraStreamOverrides((prev) => {
-      const next = { ...prev, [selectedCamId]: url };
+      const next = { ...prev, [targetCamId]: url };
       if (typeof window !== "undefined") {
         localStorage.setItem("cctv_camera_stream_overrides", JSON.stringify(next));
       }
@@ -459,9 +500,13 @@ export default function LiveCctvOperatorPage() {
     });
     setExternalStreamNotice(
       isHls
-        ? `✅ Connected ${currentCam.code} to Cloudflare HLS Direct Stream! Real-time Hls.js demuxer active.`
-        : `✅ Loaded external direct video stream on ${currentCam.code}: ${url}`
+        ? `✅ Connected ${targetCamCode} to Cloudflare HLS Direct Stream! Real-time Hls.js demuxer active.`
+        : `✅ Loaded external direct video stream on ${targetCamCode}: ${url}`
     );
+    if (asNewCamera) {
+      handleSelectCamera(targetCamId);
+    }
+    setShowCustomFeedInput(false);
   };
 
   const handleApplyCustomStreamToCam = async (camId: string, url: string) => {
@@ -549,6 +594,7 @@ export default function LiveCctvOperatorPage() {
     setActiveCustomStreamUrl(camStream);
     setCamFeedUrlInput(camStream || "");
     setShowCamFeedConfig(false);
+    setShowCustomFeedInput(false);
     prevFrameData.current = null;
     setCurrentMotionScore(0.0);
     // Reset playhead for clean transition
@@ -563,22 +609,40 @@ export default function LiveCctvOperatorPage() {
     setRuleExplanation(null);
     setRoiPolygon(null);
 
+    // MediaPipe Hand & Pose Landmark Gating enabled by default for Cash Register (CAM-02), Home Outside (CAM-09), and Jewelry Counter (CAM-10)
+    setIsHandPoseGatingActive(camId === "cam-02" || camId === "cam-09" || camId === "cam-10");
+
     // Set smart default zones per camera
-    if (camId === "cam-04") {
+    if (camId === "cam-02") {
+      setRoiZone([35, 45, 65, 80]);
+      setRoiZoneLabel("Cash Register Drawer & POS Tray");
+    } else if (camId === "cam-03") {
+      setRoiZone([25, 30, 80, 85]);
+      setRoiZoneLabel("Dining Booth & Table Service Area");
+    } else if (camId === "cam-04") {
       setRoiZone([8, 12, 54, 92]);
       setRoiZoneLabel("Left Trees & Perimeter Wall");
+    } else if (camId === "cam-05") {
+      setRoiZone([30, 25, 70, 85]);
+      setRoiZoneLabel("ATM Keypad & 1-Meter Privacy Zone");
+    } else if (camId === "cam-06") {
+      setRoiZone([20, 20, 75, 80]);
+      setRoiZoneLabel("One-Way Ramp Driving Lane");
     } else if (camId === "cam-07") {
-      setRoiZone([22, 15, 68, 75]);
-      setRoiZoneLabel("Underground Garage Ramp Driving Lane");
+      setRoiZone([30, 40, 70, 85]);
+      setRoiZoneLabel("Terminal Walkway & Baggage Area");
+    } else if (camId === "cam-08") {
+      setRoiZone([15, 25, 85, 85]);
+      setRoiZoneLabel("Forklift Transit Corridor");
+    } else if (camId === "cam-09") {
+      setRoiZone([20, 40, 80, 90]);
+      setRoiZoneLabel("Porch Doorstep & Driveway Zone");
+    } else if (camId === "cam-10") {
+      setRoiZone([25, 35, 75, 75]);
+      setRoiZoneLabel("Showcase Glass & Under-Counter Case");
     } else if (camId === "cam-01") {
       setRoiZone([20, 25, 75, 80]);
       setRoiZoneLabel("Main Gate Entry Zone");
-    } else if (camId === "cam-03") {
-      setRoiZone([25, 30, 80, 85]);
-      setRoiZoneLabel("Outbound Parking Lane");
-    } else if (camId === "cam-10") {
-      setRoiZone([20, 35, 75, 85]);
-      setRoiZoneLabel("Cash Register & POS Counter");
     } else if (camId === "cam-live-yt") {
       setRoiZone([10, 20, 90, 85]);
       setRoiZoneLabel("Streetfront Walkway & Roadway");
@@ -911,6 +975,15 @@ export default function LiveCctvOperatorPage() {
             ctx.fillStyle = "#ffffff";
             ctx.font = "bold 10px monospace";
             ctx.fillText(`ZONE: ${roiZoneLabel.toUpperCase()}`, firstX + 6, Math.max(14, firstY - 8));
+
+            // MediaPipe Pose & Hand Landmark Gating Overlay for Custom Polygon
+            if (isHandPoseGatingActive) {
+              ctx.fillStyle = "rgba(5, 150, 105, 0.9)";
+              ctx.fillRect(firstX + 205, Math.max(0, firstY - 22), 140, 20);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "bold 9px monospace";
+              ctx.fillText("🖐️ POSE/HAND GATE", firstX + 210, Math.max(14, firstY - 8));
+            }
             ctx.restore();
           } else if (roiZone) {
             const [x1, y1, x2, y2] = roiZone;
@@ -920,22 +993,58 @@ export default function LiveCctvOperatorPage() {
             const zh = ((y2 - y1) / 100) * H;
 
             ctx.save();
-            ctx.strokeStyle = "#38bdf8";
+            ctx.strokeStyle = isHandPoseGatingActive ? "#34d399" : "#38bdf8";
             ctx.lineWidth = 2;
             ctx.setLineDash([8, 6]);
             ctx.lineDashOffset = -t * 15;
             ctx.strokeRect(zx, zy, zw, zh);
 
             // Shaded zone background
-            ctx.fillStyle = "rgba(56, 189, 248, 0.08)";
+            ctx.fillStyle = isHandPoseGatingActive ? "rgba(52, 211, 153, 0.08)" : "rgba(56, 189, 248, 0.08)";
             ctx.fillRect(zx, zy, zw, zh);
 
             // Zone Tag
-            ctx.fillStyle = "rgba(14, 165, 233, 0.85)";
+            ctx.fillStyle = isHandPoseGatingActive ? "rgba(5, 150, 105, 0.85)" : "rgba(14, 165, 233, 0.85)";
             ctx.fillRect(zx, Math.max(0, zy - 22), 170, 20);
             ctx.fillStyle = "#ffffff";
             ctx.font = "bold 10px monospace";
             ctx.fillText(`ZONE: ${roiZoneLabel.toUpperCase()}`, zx + 6, Math.max(14, zy - 8));
+
+            // MediaPipe Pose & Hand Landmark Gating Overlay
+            if (isHandPoseGatingActive) {
+              const landmarkNodes = [
+                { x: zx + zw * 0.32 + Math.sin(t * 2.2) * 3, y: zy + zh * 0.42 + Math.cos(t * 2.2) * 2 },
+                { x: zx + zw * 0.48 + Math.sin(t * 2.8) * 2, y: zy + zh * 0.35 + Math.cos(t * 2.8) * 3 },
+                { x: zx + zw * 0.64 + Math.sin(t * 1.9) * 3, y: zy + zh * 0.44 + Math.cos(t * 1.9) * 2 },
+                { x: zx + zw * 0.52 + Math.sin(t * 2.5) * 4, y: zy + zh * 0.62 + Math.cos(t * 2.5) * 3 },
+                { x: zx + zw * 0.40 + Math.sin(t * 2.0) * 3, y: zy + zh * 0.70 + Math.cos(t * 2.0) * 2 },
+              ];
+
+              ctx.strokeStyle = "rgba(52, 211, 153, 0.65)";
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              landmarkNodes.forEach((node, idx) => {
+                if (idx === 0) ctx.moveTo(node.x, node.y);
+                else ctx.lineTo(node.x, node.y);
+              });
+              ctx.stroke();
+
+              landmarkNodes.forEach((node) => {
+                ctx.fillStyle = "#34d399";
+                ctx.shadowColor = "#34d399";
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+              });
+
+              ctx.fillStyle = "rgba(5, 150, 105, 0.9)";
+              ctx.fillRect(zx + 175, Math.max(0, zy - 22), 140, 20);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "bold 9px monospace";
+              ctx.fillText("🖐️ POSE/HAND GATE", zx + 180, Math.max(14, zy - 8));
+            }
+
             ctx.restore();
           }
 
@@ -1051,7 +1160,7 @@ export default function LiveCctvOperatorPage() {
 
     animId = requestAnimationFrame(renderOverlay);
     return () => cancelAnimationFrame(animId);
-  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent]);
+  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent, isHandPoseGatingActive]);
 
 
 
@@ -1099,6 +1208,7 @@ export default function LiveCctvOperatorPage() {
           targetConcept: targetConcept,
           detectedOcrText,
           isTextDetectionEnabled: isTextDetectionActive,
+          isHandPoseGatingEnabled: isHandPoseGatingActive,
           whatsAppRecipient,
           whatsAppMode,
         }),
@@ -1599,45 +1709,79 @@ export default function LiveCctvOperatorPage() {
       <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* LEFT COLUMN (8 Cols): Video Player & Camera Grid */}
         <div className="lg:col-span-8 flex flex-col gap-3">
-          {/* Camera Selector Pills */}
-          <div className="bg-slate-900/80 border border-slate-800 p-2 rounded-2xl flex items-center gap-1.5 overflow-x-auto shadow-md">
+          {/* Camera Selector Cards Bar */}
+          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-2xl flex items-center gap-2.5 overflow-x-auto shadow-md">
             {cameras.map((cam) => {
               const isSelected = cam.id === selectedCamId;
               const hasAlert = activeAlert?.cameraId === cam.id;
               const hasCustomFeed = Boolean(cameraStreamOverrides[cam.id]);
+              const displayName = cam.shortName || cam.name;
               return (
                 <button
                   key={cam.id}
                   onClick={() => handleSelectCamera(cam.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all ${
+                  title={`${cam.code}: ${cam.name} (${cam.location})`}
+                  className={`group flex items-center gap-3 px-3.5 py-2 rounded-2xl text-left whitespace-nowrap transition-all border flex-shrink-0 min-w-[155px] sm:min-w-[175px] ${
                     isSelected
-                      ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
-                      : "bg-slate-800/60 hover:bg-slate-800 text-slate-300"
-                  } ${hasAlert ? "alert-glow-box bg-rose-500/30 text-rose-200" : ""}`}
+                      ? "bg-gradient-to-r from-cyan-500/25 to-sky-500/15 border-cyan-400 text-white shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-400/50"
+                      : "bg-slate-950/80 hover:bg-slate-900/90 border-slate-800/90 hover:border-slate-700 text-slate-300"
+                  } ${hasAlert ? "alert-glow-box bg-rose-500/30 border-rose-500 text-rose-200" : ""}`}
                 >
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      hasCustomFeed
-                        ? "bg-rose-400 animate-pulse-fast"
-                        : cam.isLiveStream
-                        ? "bg-rose-400 animate-pulse-fast"
-                        : hasAlert
-                        ? "bg-rose-400 animate-ping"
-                        : isSelected
-                        ? "bg-slate-950"
-                        : "bg-emerald-400"
+                  {/* Large Prominent Scenario Icon */}
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl border transition-all ${
+                      isSelected
+                        ? "bg-cyan-400/25 border-cyan-300/40 text-cyan-200 shadow-sm shadow-cyan-400/20"
+                        : "bg-slate-900 border-slate-800 text-slate-200 group-hover:scale-105 group-hover:border-slate-700"
                     }`}
-                  />
-                  <span>{cam.code}</span>
-                  {hasCustomFeed ? (
-                    <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold border border-rose-400/40">
-                      LIVE HLS
+                  >
+                    <span>{cam.icon || "📹"}</span>
+                  </div>
+
+                  {/* Camera Code & Visual Scenario Title */}
+                  <div className="flex flex-col min-w-0 pr-1">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          hasCustomFeed
+                            ? "bg-rose-400 animate-pulse-fast"
+                            : cam.isLiveStream
+                            ? "bg-rose-400 animate-pulse-fast"
+                            : hasAlert
+                            ? "bg-rose-400 animate-ping"
+                            : isSelected
+                            ? "bg-cyan-400 animate-pulse"
+                            : "bg-emerald-400"
+                        }`}
+                      />
+                      <span className={`font-mono font-bold text-xs ${isSelected ? "text-cyan-300" : "text-white"}`}>
+                        {cam.code}
+                      </span>
+                      {(cam.id === "cam-02" || cam.id === "cam-09" || cam.id === "cam-10") && (
+                        <span className="text-[11px]" title="MediaPipe Hand & Pose Landmark Gating enabled by default">
+                          🖐️
+                        </span>
+                      )}
+                      {hasCustomFeed ? (
+                        <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[8px] font-bold border border-rose-400/40 uppercase">
+                          Live HLS
+                        </span>
+                      ) : cam.id === "cam-live-yt" ? (
+                        <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[8px] font-bold border border-rose-400/40 uppercase">
+                          Relay
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {/* Prominent Scenario Name */}
+                    <span
+                      className={`text-[11px] font-medium truncate max-w-[130px] mt-0.5 ${
+                        isSelected ? "text-cyan-100 font-semibold" : "text-slate-400 group-hover:text-slate-200"
+                      }`}
+                    >
+                      {displayName}
                     </span>
-                  ) : cam.id === "cam-live-yt" ? (
-                    <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold border border-rose-400/40">
-                      LIVE RELAY
-                    </span>
-                  ) : null}
+                  </div>
                 </button>
               );
             })}
@@ -1645,15 +1789,20 @@ export default function LiveCctvOperatorPage() {
             {/* External Stream / YouTube Input Button */}
             <button
               onClick={() => setShowCustomFeedInput(!showCustomFeedInput)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition whitespace-nowrap ${
+              className={`flex items-center gap-2.5 px-3.5 py-2 rounded-2xl text-xs font-mono font-bold border transition whitespace-nowrap flex-shrink-0 ${
                 showCustomFeedInput
-                  ? "bg-rose-500 text-slate-950 border-rose-400 shadow-md shadow-rose-500/20"
-                  : "bg-slate-800/80 hover:bg-slate-800 text-rose-300 border-rose-500/40"
+                  ? "bg-rose-500 text-slate-950 border-rose-400 shadow-lg shadow-rose-500/20"
+                  : "bg-slate-950/80 hover:bg-slate-900 border-rose-500/40 text-rose-300 hover:text-white"
               }`}
-              title="Add External Stream or YouTube Feed"
+              title="Add External Stream or Connect New Live Camera"
             >
-              <Radio className="w-3.5 h-3.5 text-rose-400" />
-              <span>+ Stream URL</span>
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-lg">
+                <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+              </div>
+              <div className="flex flex-col text-left">
+                <span className="font-bold text-xs">+ Stream URL</span>
+                <span className="text-[10px] text-rose-400/80 font-normal">Add Live HLS / CAM</span>
+              </div>
             </button>
           </div>
 
@@ -1667,17 +1816,25 @@ export default function LiveCctvOperatorPage() {
                     type="text"
                     value={customFeedUrl}
                     onChange={(e) => setCustomFeedUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleLoadCustomFeed()}
-                    placeholder="Paste direct stream URL (.m3u8, .mp4) or select Cloudflare feed below..."
+                    onKeyDown={(e) => e.key === "Enter" && handleLoadCustomFeed(undefined, true)}
+                    placeholder="Paste direct stream URL (.m3u8, .mp4, YouTube) or pick below..."
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-400 font-mono"
                   />
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <button
-                    onClick={() => handleLoadCustomFeed()}
-                    className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 text-xs font-bold transition whitespace-nowrap"
+                    onClick={() => handleLoadCustomFeed(undefined, true)}
+                    className="px-3.5 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-bold transition whitespace-nowrap shadow-md shadow-cyan-400/20 flex items-center gap-1.5"
+                    title={`Create a brand new camera tab (CAM-${String(cameras.length + 1).padStart(2, "0")}) for this stream`}
                   >
-                    Load Stream
+                    <span>➕ Add as CAM-{String(cameras.length + 1).padStart(2, "0")}</span>
+                  </button>
+                  <button
+                    onClick={() => handleLoadCustomFeed(undefined, false)}
+                    className="px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 text-xs font-bold transition whitespace-nowrap"
+                    title={`Overrides stream on currently selected camera ${currentCam.code}`}
+                  >
+                    Apply to {currentCam.code}
                   </button>
                   {activeCustomStreamUrl && (
                     <button
@@ -1753,8 +1910,9 @@ export default function LiveCctvOperatorPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse-fast" />
-                <span className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                  AI Trigger Definition for {currentCam.code}
+                <span className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                  <span className="text-sm leading-none">{currentCam.icon || "📹"}</span>
+                  <span>AI Trigger Definition for {currentCam.code}</span>
                 </span>
                 <span className="text-[11px] text-slate-400 hidden sm:inline">
                   • {currentCam.name}
@@ -1989,6 +2147,22 @@ export default function LiveCctvOperatorPage() {
                 >
                   <span className="font-mono text-xs">🔤</span>
                   <span>Text Detection: {isTextDetectionActive ? "ON" : "OFF"}</span>
+                </button>
+
+                {/* Hand & Pose Landmark Gating Toggle */}
+                <button
+                  onClick={() => {
+                    setIsHandPoseGatingActive((prev) => !prev);
+                  }}
+                  className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg font-bold border transition ${
+                    isHandPoseGatingActive
+                      ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-md shadow-emerald-400/25"
+                      : "bg-slate-950 border-slate-800 text-slate-400 hover:text-emerald-300 hover:border-emerald-500/40"
+                  }`}
+                  title="Enable MediaPipe Pose & Hand Landmark Gating (Detects Hands reaching into drawers/counters, Sitting/Standing postures)"
+                >
+                  <span className="font-mono text-xs">🖐️</span>
+                  <span>Hand & Pose Gating: {isHandPoseGatingActive ? "ON" : "OFF"}</span>
                 </button>
 
                 {/* Clear Active Shape */}
@@ -2259,6 +2433,7 @@ export default function LiveCctvOperatorPage() {
                 <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
                   <div className="flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-200">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-fast" />
+                    <span className="text-xs leading-none">{currentCam.icon || "📹"}</span>
                     <span className="font-bold text-cyan-400">
                       {cameraStreamOverrides[selectedCamId] ? `${currentCam.code} [LIVE HLS]` : activeCustomStreamUrl ? "LIVE STREAM" : currentCam.code}
                     </span>
@@ -2309,6 +2484,12 @@ export default function LiveCctvOperatorPage() {
                               "{zoneOcrText}"
                             </span>
                           )}
+                        </div>
+                      )}
+                      {isHandPoseGatingActive && (
+                        <div className="flex items-center gap-1.5 bg-emerald-950/90 border border-emerald-500/60 px-2.5 py-1 rounded-xl text-[11px] font-mono text-emerald-300 shadow-md">
+                          <span>🖐️</span>
+                          <span>POSE & HAND GATE: ON</span>
                         </div>
                       )}
                     </div>
@@ -2495,13 +2676,14 @@ export default function LiveCctvOperatorPage() {
                 <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-xl border border-slate-800">
                   <button
                     onClick={() => setEventViewFilter("current")}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
                       eventViewFilter === "current"
                         ? "bg-cyan-500 text-slate-950 shadow-sm font-bold"
                         : "text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    📍 {currentCam.code} ({cameraEvents.length})
+                    <span>{currentCam.icon || "📍"}</span>
+                    <span>{currentCam.code} ({cameraEvents.length})</span>
                   </button>
                   <button
                     onClick={() => setEventViewFilter("all")}
@@ -2520,8 +2702,10 @@ export default function LiveCctvOperatorPage() {
                     onClick={() => {
                       if (eventViewFilter === "current") {
                         setRecordedEvents((prev) => prev.filter((e) => e.cameraId !== selectedCamId));
+                        fetch(`/api/cctv/events?cameraId=${encodeURIComponent(selectedCamId)}`, { method: "DELETE" }).catch(() => {});
                       } else {
                         setRecordedEvents([]);
+                        fetch("/api/cctv/events", { method: "DELETE" }).catch(() => {});
                       }
                     }}
                     className="text-[10px] text-slate-500 hover:text-rose-400 font-mono transition"

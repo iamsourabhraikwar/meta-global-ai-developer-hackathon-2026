@@ -6,6 +6,8 @@ export interface SamMaskPoint {
 export interface CameraConfig {
   id: string;
   code: string;
+  icon?: string;
+  shortName?: string;
   name: string;
   location: string;
   videoUrl: string;

@@ -384,34 +384,34 @@ export default function WelcomeSetupWizard({
                   </span>
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-01:</span> Main Gate Barrier
+                      <span className="text-cyan-400 font-bold">🚧 CAM-01:</span> North Gate Entry
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-950 border border-emerald-500/40 text-emerald-300 font-bold">
+                      <span className="text-emerald-400">💵 CAM-02:</span> POS & Cash Register 🖐️
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-02:</span> Industrial Loading Bay
+                      <span className="text-cyan-400 font-bold">🍽️ CAM-03:</span> Restaurant Dining Floor
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-03:</span> Parking Lot Outbound
+                      <span className="text-cyan-400 font-bold">🌲 CAM-04:</span> Perimeter Security Zone
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-04:</span> Perimeter Fence Watch
+                      <span className="text-cyan-400 font-bold">🏧 CAM-05:</span> 24/7 ATM Lobby
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-05:</span> Freight Dispatch Bay
+                      <span className="text-cyan-400 font-bold">🅿️ CAM-06:</span> Garage Parking Ramp
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-06:</span> Underground Garage
+                      <span className="text-cyan-400 font-bold">🧳 CAM-07:</span> Terminal Concourse
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-07:</span> Garage Access Ramp
+                      <span className="text-cyan-400 font-bold">🚜 CAM-08:</span> Warehouse Forklift Zone
                     </div>
-                    <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-08:</span> Warehouse Inventory
-                    </div>
-                    <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                      <span className="text-cyan-400 font-bold">CAM-09:</span> Safety Transit Corridor
+                    <div className="p-2 rounded-lg bg-slate-950 border border-emerald-500/40 text-emerald-300 font-bold">
+                      <span className="text-emerald-400">🏡 CAM-09:</span> Home Outside Porch 🖐️
                     </div>
                     <div className="p-2 rounded-lg bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
-                      <span className="text-amber-400">CAM-10:</span> Retail Cash Counter
+                      <span className="text-amber-400">💎 CAM-10:</span> Jewelry Showcase Counter 🖐️
                     </div>
                   </div>
                 </div>
@@ -483,10 +483,14 @@ export default function WelcomeSetupWizard({
                 </span>
                 <div className="flex flex-col gap-1.5">
                   {[
-                    "cash drawer opened or transaction at checkout register counter",
-                    "silver SUV and outbound traffic on exit ramp",
+                    "cash drawer opened or hand reaching into register drawer to pick cash",
+                    "customer waiting at empty table or dine and dash without paying",
+                    "porch pirate package theft or car door handle prowling in driveway",
+                    "shoulder surfing intrusion or loitering near ATM keypad",
+                    "wrong-way vehicle or pedestrian walking on vehicle ramp",
+                    "unattended baggage or abandoned suitcase left by owner",
+                    "worker in forklift transit path or worker down",
                     "children running behind trees along perimeter",
-                    "person interacting with parked car or perimeter",
                     "blue delivery van entering gate",
                   ].map((rule) => (
                     <button
