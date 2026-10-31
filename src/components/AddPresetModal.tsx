@@ -58,8 +58,8 @@ export default function AddPresetModal({
     {
       label: "💵 Cash Register / Counter (MediaPipe Hand Gate)",
       obj: "cash drawer and hand transactions",
-      action: "cash drawer opened or hand reaching into register drawer to pick cash",
-      condition: "trigger when cash drawer is pulled open or currency is handled unattended",
+      action: "cash drawer opened or hand reaching into register; inspect visible currency notes, denomination amount, and cash taken vs placed",
+      condition: "trigger when cash drawer is pulled open or currency is handled; inspect denomination amount and cash-in/cash-out",
       env: "Retail POS & Cash Register Counter",
       ocr: true,
       text: "CASH / RECEIPT",

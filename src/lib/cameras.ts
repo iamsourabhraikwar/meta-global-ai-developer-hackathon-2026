@@ -25,7 +25,7 @@ export const CAMERAS: CameraConfig[] = [
     resolution: "3840x2160 (4K)",
     fps: 30,
     status: "ONLINE",
-    defaultTarget: "cash drawer opened or hand reaching into register drawer to pick cash",
+    defaultTarget: "cash drawer opened or hand reaching into register drawer to pick cash. Inspect visible currency notes, estimate denomination/amount, and identify if currency was taken from or placed into the drawer.",
   },
   {
     id: "cam-03",

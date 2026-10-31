@@ -47,6 +47,12 @@ export interface MotionEventRecord {
     carriedObjects?: string;
     action?: string;
   };
+  transactionDetails?: {
+    cashDetected?: boolean;
+    currencyType?: string | null;
+    estimatedDenomination?: string | null;
+    actionType?: "cash_taken" | "cash_placed" | "inspecting_drawer" | null;
+  };
   riskScore?: number;
   detectedText?: string | null; // Extracted on-screen text or car plate from Watch Zone
   isTextDetectionEnabled?: boolean;

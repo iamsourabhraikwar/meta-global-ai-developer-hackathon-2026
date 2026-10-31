@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
       temporalFrames: Array.isArray(temporalFrames) && temporalFrames.length > 0 ? temporalFrames : undefined,
       vehicleDetails: museResult.vehicleDetails,
       personDetails: museResult.personDetails,
+      transactionDetails: museResult.transactionDetails,
       riskScore: museResult.riskScore,
       detectedText: museResult.detectedText || detectedOcrText || null,
       isTextDetectionEnabled: Boolean(isTextDetectionEnabled),

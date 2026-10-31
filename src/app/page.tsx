@@ -51,7 +51,7 @@ export default function LiveCctvOperatorPage() {
   // Per-Camera Independent Trigger Rules Memory
   const [cameraRules, setCameraRules] = useState<Record<string, string>>({
     "cam-01": "blue delivery van entering gate",
-    "cam-02": "cash drawer opened or hand reaching into register drawer to pick cash",
+    "cam-02": "cash drawer opened or hand reaching into register drawer to pick cash. Inspect visible currency notes, estimate denomination/amount, and identify if currency was taken from or placed into the drawer.",
     "cam-03": "customer waiting at empty table or dine and dash without paying",
     "cam-04": "children running behind trees along perimeter",
     "cam-05": "shoulder surfing intrusion or loitering near ATM keypad",
@@ -197,7 +197,7 @@ export default function LiveCctvOperatorPage() {
 
   // Dynamic Target Presets State (User can delete or add custom presets)
   const [targetPresets, setTargetPresets] = useState<string[]>([
-    "cash drawer opened or hand reaching into register drawer to pick cash",
+    "cash drawer opened or hand reaching into register: inspect currency amount and cash-in/cash-out",
     "customer waiting at empty table or dine and dash without paying",
     "porch pirate package theft or car door handle prowling in driveway",
     "shoulder surfing intrusion or loitering near ATM keypad",
@@ -2795,6 +2795,25 @@ export default function LiveCctvOperatorPage() {
                           <div className="flex items-center gap-1.5 flex-wrap my-1 text-[10px] font-mono">
                             <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
                               👤 {evt.personDetails.clothing || "Person"} {evt.personDetails.action ? `• ${evt.personDetails.action}` : ""}
+                            </span>
+                          </div>
+                        )}
+
+                        {evt.transactionDetails && (
+                          <div className="flex items-center gap-1.5 flex-wrap my-1 text-[10px] font-mono">
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-bold flex items-center gap-1">
+                              <span>💵</span>
+                              <span>{evt.transactionDetails.actionType?.replace(/_/g, " ").toUpperCase() || "CASH DETECTED"}</span>
+                              {evt.transactionDetails.estimatedDenomination && (
+                                <span className="text-white bg-slate-900/90 px-1.5 py-0.2 rounded border border-emerald-500/30">
+                                  {evt.transactionDetails.estimatedDenomination}
+                                </span>
+                              )}
+                              {evt.transactionDetails.currencyType && (
+                                <span className="bg-emerald-400/20 text-emerald-200 px-1 rounded text-[9px]">
+                                  {evt.transactionDetails.currencyType}
+                                </span>
+                              )}
                             </span>
                           </div>
                         )}

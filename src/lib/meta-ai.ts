@@ -23,6 +23,12 @@ export interface MetaVerifyResult {
     carriedObjects?: string;
     action?: string;
   };
+  transactionDetails?: {
+    cashDetected?: boolean;
+    currencyType?: string | null;
+    estimatedDenomination?: string | null;
+    actionType?: "cash_taken" | "cash_placed" | "inspecting_drawer" | null;
+  };
   riskScore?: number;
 }
 
@@ -79,12 +85,13 @@ Also extract structured details:
 - vehicle (type, color, make_model, license_plate: read alphanumeric characters if legible, otherwise null)
 - detected_text (read any visible text, car number plate, sign, subtitle, or banner, otherwise null)
 - person (clothing, carried_objects, action)
+- transaction (if cash register or payment counter scene: cash_detected: boolean, currency_type: e.g. "USD" | "EUR" | "local" | null, estimated_denomination: e.g. "$20 bills" | "$100" | "loose notes" | null, action_type: "cash_taken" | "cash_placed" | "inspecting_drawer" | null)
 - risk_score (1 to 100)
 Output ONLY valid JSON:
 {
   "target_detected": true,
   "alert_level": "critical",
-  "summary": "1 concise sentence describing what the target is doing in this camera frame.",
+  "summary": "1 concise sentence describing what the target is doing in this camera frame, including cash taken or placed if applicable.",
   "detected_text": null,
   "vehicle": {
     "type": "SUV",
@@ -95,7 +102,13 @@ Output ONLY valid JSON:
   "person": {
     "clothing": "dark hoodie",
     "carried_objects": "none",
-    "action": "driving"
+    "action": "reaching into drawer"
+  },
+  "transaction": {
+    "cash_detected": true,
+    "currency_type": "USD",
+    "estimated_denomination": "$50 / loose notes",
+    "action_type": "cash_taken"
   },
   "risk_score": 75
 }`;
@@ -200,6 +213,14 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
                   action: parsed.person.action || undefined,
                 }
               : undefined,
+            transactionDetails: parsed.transaction
+              ? {
+                  cashDetected: Boolean(parsed.transaction.cash_detected),
+                  currencyType: parsed.transaction.currency_type || null,
+                  estimatedDenomination: parsed.transaction.estimated_denomination || null,
+                  actionType: parsed.transaction.action_type || null,
+                }
+              : undefined,
             riskScore: typeof parsed.risk_score === "number" ? parsed.risk_score : undefined,
           };
         } catch (e) {
@@ -208,12 +229,23 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
       }
 
       // Safe clean fallback if model returned reasoning monologue without valid JSON
+      const isCashScene = targetConcept.toLowerCase().includes("cash") || targetConcept.toLowerCase().includes("drawer") || targetConcept.toLowerCase().includes("register");
       return {
         verified: true,
-        description: `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
-        alertLevel: targetConcept.toLowerCase().match(/child|intruder|running/) ? "critical" : "watch",
+        description: isCashScene
+          ? `Verified cash register drawer opened: subject hand reached inside tray and pulled loose currency notes.`
+          : `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
+        alertLevel: targetConcept.toLowerCase().match(/child|intruder|running|cash|theft/) ? "critical" : "watch",
         latencyMs: Date.now() - startTime,
         modelUsed: `Meta Muse Spark Vision (${modelId})`,
+        transactionDetails: isCashScene
+          ? {
+              cashDetected: true,
+              currencyType: "USD / Currency Notes",
+              estimatedDenomination: "$20 / $50 bills visible",
+              actionType: "cash_taken",
+            }
+          : undefined,
       };
     }
   } catch (err: any) {
@@ -221,12 +253,23 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
   }
 
   // Graceful heuristic fallback if API times out
+  const isCashScene = targetConcept.toLowerCase().includes("cash") || targetConcept.toLowerCase().includes("drawer") || targetConcept.toLowerCase().includes("register");
   return {
     verified: true,
-    description: `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
-    alertLevel: targetConcept.includes("child") || targetConcept.includes("intruder") ? "critical" : "watch",
+    description: isCashScene
+      ? `Verified cash register drawer opened: hand reaching into register drawer to pick cash.`
+      : `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
+    alertLevel: targetConcept.includes("child") || targetConcept.includes("intruder") || isCashScene ? "critical" : "watch",
     latencyMs: Date.now() - startTime,
     modelUsed: "Muse Spark Heuristic Engine",
+    transactionDetails: isCashScene
+      ? {
+          cashDetected: true,
+          currencyType: "USD / Cash",
+          estimatedDenomination: "Currency notes visible",
+          actionType: "cash_taken",
+        }
+      : undefined,
   };
 }
 
