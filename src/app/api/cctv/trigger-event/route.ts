@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       cameraId,
+      cameraName,
       videoSecond,
       motionScore,
       preRollSeconds = 10,
@@ -51,7 +52,14 @@ export async function POST(req: NextRequest) {
       isTextDetectionEnabled,
     } = body;
 
-    const cam = CAMERAS.find((c) => c.id === cameraId) || CAMERAS[0];
+    const existingCam = CAMERAS.find((c) => c.id === cameraId);
+    const cam = existingCam || {
+      id: cameraId || "cam-custom",
+      name: cameraName || (cameraId ? `Camera ${String(cameraId).toUpperCase()}` : "External Live Feed"),
+      code: String(cameraId || "CAM-LIVE").toUpperCase(),
+      defaultTarget: targetConcept || "moving vehicle or person",
+      videoUrl: body.videoUrl || "",
+    };
     const concept = targetConcept || cam.defaultTarget || "moving vehicle or person";
 
     // 1. Verification with Meta Muse Spark on Baseten ($100 credits)

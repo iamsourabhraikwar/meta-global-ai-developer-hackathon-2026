@@ -274,8 +274,9 @@ export default function LiveCctvOperatorPage() {
     return null;
   };
 
-  // WhatsApp Alert Configuration State (Demo Number: 15550192834)
-  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("15550192834");
+  // WhatsApp Alert Configuration State (Recipient: 917999475243)
+  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("917999475243");
+  const [whatsAppAccessToken, setWhatsAppAccessToken] = useState<string>("");
   const [whatsAppMode, setWhatsAppMode] = useState<"full_reasoning" | "summary_only" | "image_only">("full_reasoning");
   const [showWhatsAppSettings, setShowWhatsAppSettings] = useState<boolean>(false);
   const [whatsAppTestStatus, setWhatsAppTestStatus] = useState<string | null>(null);
@@ -306,7 +307,7 @@ export default function LiveCctvOperatorPage() {
           if (raw && !raw.includes("@")) {
             setWhatsAppRecipient(raw);
           } else {
-            setWhatsAppRecipient("15550192834");
+            setWhatsAppRecipient("917999475243");
           }
         }
       })
@@ -327,6 +328,7 @@ export default function LiveCctvOperatorPage() {
           targetConcept: targetConcept,
           summary: `Test security alert for "${targetConcept}". Verification active.`,
           imageBase64: b64,
+          accessToken: whatsAppAccessToken || undefined,
         }),
       });
       const data = await res.json();
@@ -671,6 +673,12 @@ export default function LiveCctvOperatorPage() {
       [selectedCamId]: ruleToSave,
     }));
 
+    // Auto-add customized rule into targetPresets if not already present
+    setTargetPresets((prev) => {
+      const exists = prev.some((p) => p.toLowerCase() === ruleToSave.toLowerCase());
+      return exists ? prev : [ruleToSave, ...prev];
+    });
+
     setIsCompilingRule(true);
     setIsSavedRule(false);
 
@@ -712,6 +720,37 @@ export default function LiveCctvOperatorPage() {
     } finally {
       setIsCompilingRule(false);
     }
+  };
+
+  // Multi-preset rule selection: clicking toggles rule inclusion (OR logic) for Meta Muse Spark
+  const handleTogglePreset = (preset: string) => {
+    const isCurrentlyActive = targetConcept
+      .toLowerCase()
+      .split(/\s*,\s*OR\s*|\s*OR\s*/i)
+      .some((part) => part.trim().toLowerCase() === preset.toLowerCase());
+
+    let newCombinedRule = "";
+    if (isCurrentlyActive) {
+      // Deselect preset
+      const remaining = targetConcept
+        .split(/\s*,\s*OR\s*|\s*OR\s*/i)
+        .map((p) => p.trim())
+        .filter((p) => p && p.toLowerCase() !== preset.toLowerCase());
+      newCombinedRule = remaining.length > 0 ? remaining.join(", OR ") : currentCam.defaultTarget || "";
+    } else {
+      // Select preset
+      const existingParts = targetConcept
+        .split(/\s*,\s*OR\s*|\s*OR\s*/i)
+        .map((p) => p.trim())
+        .filter((p) => p && p.toLowerCase() !== (currentCam.defaultTarget || "").toLowerCase());
+
+      if (!existingParts.some((p) => p.toLowerCase() === preset.toLowerCase())) {
+        existingParts.push(preset);
+      }
+      newCombinedRule = existingParts.join(", OR ");
+    }
+
+    handleSaveCameraRule(newCombinedRule);
   };
 
   // Camera-filtered events and general calculations
@@ -1198,6 +1237,7 @@ export default function LiveCctvOperatorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cameraId: currentCam.id,
+          cameraName: currentCam.name,
           videoSecond: sec,
           motionScore: score,
           preRollSeconds: 10,
@@ -1626,17 +1666,33 @@ export default function LiveCctvOperatorPage() {
 
                   <div>
                     <label className="text-[10px] text-slate-400 block mb-1">
-                      Recipient Phone Number (Demo Default: +1 555-019-2834):
+                      Recipient Phone Number:
                     </label>
                     <input
                       type="text"
                       value={whatsAppRecipient}
                       onChange={(e) => setWhatsAppRecipient(e.target.value.replace(/[^0-9+]/g, ""))}
-                      placeholder="e.g. 15550192834 (numbers only)"
+                      placeholder="e.g. 917999475243 (numbers only)"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
                     />
                     <p className="text-[9px] text-slate-500 mt-0.5 italic">
-                      * Enter mobile phone with country code (numbers only, no emails).
+                      * Enter mobile phone with country code (numbers only, e.g. 917999475243).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">
+                      Meta Access Token (Temporary 24h Token):
+                    </label>
+                    <input
+                      type="password"
+                      value={whatsAppAccessToken}
+                      onChange={(e) => setWhatsAppAccessToken(e.target.value.trim())}
+                      placeholder="Paste fresh token from Meta developers console..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
+                    />
+                    <p className="text-[9px] text-slate-500 mt-0.5 italic">
+                      * If you get Authentication Error, paste the updated token here.
                     </p>
                   </div>
 
@@ -2009,33 +2065,44 @@ export default function LiveCctvOperatorPage() {
                 <span className="text-[10px] text-slate-400 font-medium mr-1">
                   Target Presets:
                 </span>
-                {targetPresets.map((preset) => (
-                  <div
-                    key={preset}
-                    className={`inline-flex items-center gap-1 text-[10px] pl-2.5 pr-1.5 py-1 rounded-lg border transition ${
-                      targetConcept.toLowerCase() === preset.toLowerCase()
-                        ? "bg-cyan-500/20 border-cyan-400/60 text-cyan-300 font-bold"
-                        : "bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    <button
-                      onClick={() => handleSaveCameraRule(preset)}
-                      className="text-left"
+                {targetPresets.map((preset) => {
+                  const isSelected = targetConcept
+                    .toLowerCase()
+                    .split(/\s*,\s*OR\s*|\s*OR\s*/i)
+                    .some((part) => part.trim().toLowerCase() === preset.toLowerCase());
+
+                  return (
+                    <div
+                      key={preset}
+                      className={`inline-flex items-center gap-1.5 text-[10px] pl-2.5 pr-1.5 py-1 rounded-lg border transition select-none ${
+                        isSelected
+                          ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold shadow-sm shadow-cyan-500/20 ring-1 ring-cyan-400/40"
+                          : "bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
                     >
-                      + {preset}
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeletePreset(preset);
-                      }}
-                      className="hover:text-rose-400 text-slate-500 font-bold text-[10px] ml-0.5 px-0.5"
-                      title="Delete this preset"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        onClick={() => handleTogglePreset(preset)}
+                        className="text-left flex items-center gap-1"
+                        title={isSelected ? "Active rule: Click to deselect" : "Click to add rule to active monitor"}
+                      >
+                        <span className={isSelected ? "text-cyan-400 font-bold" : "text-slate-500 font-semibold"}>
+                          {isSelected ? "✓" : "+"}
+                        </span>
+                        {preset}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePreset(preset);
+                        }}
+                        className="hover:text-rose-400 text-slate-500 font-bold text-[10px] ml-0.5 px-0.5"
+                        title="Delete this preset"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
 
                 {/* Add Custom Preset Modal Button */}
                 <button

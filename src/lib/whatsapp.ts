@@ -15,6 +15,8 @@ export interface WhatsAppAlertPayload {
   timeShort: string;
   imageBase64?: string;
   recipientPhone?: string;
+  phoneNumberId?: string;
+  accessToken?: string;
   mode?: "full_reasoning" | "summary_only" | "image_only";
 }
 
@@ -70,8 +72,8 @@ export async function sendWhatsAppImageAlert(payload: WhatsAppAlertPayload): Pro
   captionSent: string;
 }> {
   const recipient = (payload.recipientPhone || process.env.WHATSAPP_RECIPIENT_PHONE || "").replace(/\D/g, "");
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || "";
+  const phoneNumberId = payload.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+  const accessToken = payload.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || "";
   const mode = payload.mode || "full_reasoning";
 
   let caption = "";

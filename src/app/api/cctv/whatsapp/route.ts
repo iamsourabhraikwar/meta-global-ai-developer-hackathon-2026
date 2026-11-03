@@ -11,6 +11,8 @@ export async function POST(req: NextRequest) {
     const targetConcept = body.targetConcept || "children running behind trees";
     const summary = body.summary || "Verified activity matching operator target.";
     const imageBase64 = body.imageBase64;
+    const accessToken = body.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || "";
+    const phoneNumberId = body.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
 
     const result = await sendWhatsAppImageAlert({
       cameraName,
@@ -21,6 +23,8 @@ export async function POST(req: NextRequest) {
       timeShort: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       imageBase64,
       recipientPhone,
+      accessToken,
+      phoneNumberId,
     });
 
     return NextResponse.json({
