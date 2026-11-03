@@ -1682,17 +1682,17 @@ export default function LiveCctvOperatorPage() {
 
                   <div>
                     <label className="text-[10px] text-slate-400 block mb-1">
-                      Meta Access Token (Temporary 24h Token):
+                      Meta Access Token (Permanent or 24h Token):
                     </label>
                     <input
                       type="password"
                       value={whatsAppAccessToken}
                       onChange={(e) => setWhatsAppAccessToken(e.target.value.trim())}
-                      placeholder="Paste fresh token from Meta developers console..."
+                      placeholder="Paste token (already saved in .env.local)..."
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
                     />
                     <p className="text-[9px] text-slate-500 mt-0.5 italic">
-                      * If you get Authentication Error, paste the updated token here.
+                      * Permanent system user token is active in .env.local.
                     </p>
                   </div>
 
@@ -1730,6 +1730,10 @@ export default function LiveCctvOperatorPage() {
                         <span>📸 Image Only</span>
                       </label>
                     </div>
+                  </div>
+
+                  <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl p-2 text-[10px] text-emerald-300/90 leading-tight">
+                    💬 <strong>Important:</strong> In WhatsApp, send a quick <em>&quot;Hi&quot;</em> to <strong>+1 (555) 147-4704</strong> to activate Meta&apos;s 24h custom alert window.
                   </div>
 
                   <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
