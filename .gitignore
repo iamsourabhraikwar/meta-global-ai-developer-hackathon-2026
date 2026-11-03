@@ -19,6 +19,7 @@ dist/
 
 # Database local runtime captures & events
 data/*.json
+data/*.py
 
 # Large surveillance footage files (>100MB exceeds GitHub push limit)
 public/cctv/**/*.mp4
