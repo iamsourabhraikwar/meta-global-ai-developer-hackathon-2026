@@ -1,0 +1,365 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#060b16" />
+      <stop offset="50%" stop-color="#0b1324" />
+      <stop offset="100%" stop-color="#070d19" />
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.2" />
+      <stop offset="50%" stop-color="#3b82f6" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0.2" />
+    </linearGradient>
+    <linearGradient id="metaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#22d3ee" />
+    </marker>
+    <marker id="arrowViolet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#a78bfa" />
+    </marker>
+    <marker id="arrowEmerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="760" rx="16" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="2" />
+
+  <!-- Top Header Banner -->
+  <rect x="24" y="20" width="1152" height="68" rx="12" fill="url(#headerGrad)" stroke="#0ea5e9" stroke-opacity="0.4" stroke-width="1.5" />
+  <text x="48" y="49" fill="#f8fafc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="20" font-weight="800" letter-spacing="0.5">
+    AUTONOMOUS LIVE CCTV OPERATOR — SYSTEM ARCHITECTURE
+  </text>
+  <text x="48" y="72" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="600" letter-spacing="0.8">
+    META GLOBAL AI DEVELOPER HACKATHON 2026 • POWERED BY META MUSE SPARK OPEN (meta-models/muse-spark-open-1026)
+  </text>
+  <rect x="970" y="36" width="186" height="34" rx="8" fill="#0f172a" stroke="#22d3ee" stroke-width="1.2" />
+  <text x="1063" y="58" text-anchor="middle" fill="#22d3ee" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12" font-weight="700">
+    Baseten + WhatsApp v21.0
+  </text>
+
+  <!-- ==================== COLUMN 1: VIDEO INGESTION ==================== -->
+  <rect x="24" y="110" width="250" height="545" rx="12" fill="#0f172a" stroke="#0284c7" stroke-width="1.5" />
+  <rect x="24" y="110" width="250" height="42" rx="12" fill="#0369a1" fill-opacity="0.35" />
+  <text x="149" y="136" text-anchor="middle" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13.5" font-weight="800" letter-spacing="0.6">
+    1. MULTI-STREAM INGESTION
+  </text>
+
+  <!-- Feed Box 1 -->
+  <rect x="40" y="170" width="218" height="92" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" />
+  <text x="54" y="194" fill="#22d3ee" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Cloudflare &amp; Direct HLS (.m3u8)
+  </text>
+  <text x="54" y="214" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Low-latency hls.js demuxing
+  </text>
+  <text x="54" y="232" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Adaptive bitrate edge playback
+  </text>
+  <text x="54" y="250" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+    • Zero-CORS proxy tunnel
+  </text>
+
+  <!-- Feed Box 2 -->
+  <rect x="40" y="278" width="218" height="96" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" />
+  <text x="54" y="302" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    YouTube Live RAM Relay
+  </text>
+  <text x="54" y="322" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • yt-dlp + FFmpeg HLS muxer
+  </text>
+  <text x="54" y="340" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Ephemeral 2s .ts RAM chunks
+  </text>
+  <text x="54" y="358" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+    • Auto-purges old segments (&lt;15MB)
+  </text>
+
+  <!-- Feed Box 3 -->
+  <rect x="40" y="390" width="218" height="92" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" />
+  <text x="54" y="414" fill="#60a5fa" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    RTSP / TCP Camera Socket
+  </text>
+  <text x="54" y="434" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Hardware IP camera ingestion
+  </text>
+  <text x="54" y="452" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • H.264 stream packet copy
+  </text>
+  <text x="54" y="470" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+    • Sub-second local LAN bridge
+  </text>
+
+  <!-- Feed Box 4 -->
+  <rect x="40" y="498" width="218" height="138" rx="8" fill="#1e293b" stroke="#0ea5e9" stroke-opacity="0.5" stroke-width="1.2" />
+  <text x="54" y="522" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    20 Pre-Configured Scenarios
+  </text>
+  <text x="54" y="544" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • CAM-01: Vehicle Gate &amp; Fleet ID
+  </text>
+  <text x="54" y="564" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • CAM-02: Retail POS Cash Register
+  </text>
+  <text x="54" y="584" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • CAM-11..15: Home &amp; Package Guard
+  </text>
+  <text x="54" y="604" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • CAM-20: Restaurant Patio Tables
+  </text>
+  <text x="54" y="624" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+    • Custom MP4 / HLS stream upload
+  </text>
+
+  <!-- Arrow Col 1 -> Col 2 -->
+  <line x1="274" y1="380" x2="306" y2="380" stroke="#22d3ee" stroke-width="2.5" marker-end="url(#arrowCyan)" />
+
+  <!-- ==================== COLUMN 2: EDGE GATING ENGINE ==================== -->
+  <rect x="310" y="110" width="295" height="545" rx="12" fill="#0f172a" stroke="#f59e0b" stroke-width="1.5" />
+  <rect x="310" y="110" width="295" height="42" rx="12" fill="#b45309" fill-opacity="0.35" />
+  <text x="457" y="136" text-anchor="middle" fill="#fbbf24" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13.5" font-weight="800" letter-spacing="0.6">
+    2. EDGE SPATIAL &amp; SENSOR GATE
+  </text>
+
+  <!-- Edge Box 1: Custom Pencil Masking -->
+  <rect x="326" y="168" width="263" height="106" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="340" y="191" fill="#fbbf24" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Strict Spatial Watch Zone Masking
+  </text>
+  <text x="340" y="211" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Freehand Custom Pencil, Box &amp; Circle ROI
+  </text>
+  <text x="340" y="229" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Canvas ctx.clip() blacks out pixels outside
+  </text>
+  <text x="340" y="247" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Eliminates background road/walkway noise
+  </text>
+  <text x="340" y="264" fill="#fde68a" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • 10-20ms In-Browser Pixel-Delta Engine
+  </text>
+
+  <!-- Edge Box 2: 6x4 Section Notified -->
+  <rect x="326" y="288" width="263" height="110" rx="8" fill="#1e293b" stroke="#10b981" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="340" y="311" fill="#34d399" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    6×4 Spatial Section Notified Lock
+  </text>
+  <text x="340" y="331" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Subdivides ROI into 24 independent cells
+  </text>
+  <text x="340" y="349" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Locks occupied table: ✓ SEC [x,y] NOTIFIED
+  </text>
+  <text x="340" y="367" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Adjacent tables remain 100% active
+  </text>
+  <text x="340" y="385" fill="#6ee7b7" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • Per-Camera Isolated State + Auto-Reset
+  </text>
+
+  <!-- Edge Box 3: 10s HD Temporal Buffer -->
+  <rect x="326" y="412" width="263" height="104" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="340" y="435" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    10s HD Pre-Trigger Temporal Buffer
+  </text>
+  <text x="340" y="455" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Circular 1280×720 HD frame buffer (1 FPS)
+  </text>
+  <text x="340" y="473" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Captures approach (T-10s) to exit (T+3s)
+  </text>
+  <text x="340" y="491" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Preserves moving vehicle fleet numbers
+  </text>
+  <text x="340" y="508" fill="#7dd3fc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • Multi-Keyframe Temporal Packet
+  </text>
+
+  <!-- Edge Box 4: OCR & Hand/Pose -->
+  <rect x="326" y="530" width="263" height="106" rx="8" fill="#1e293b" stroke="#a855f7" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="340" y="553" fill="#c084fc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Optional Local Wasm Sensor Gates
+  </text>
+  <text x="340" y="573" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Text Detection (ON/OFF): tesseract.js WASM
+  </text>
+  <text x="340" y="591" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Hand &amp; Pose Gate (ON/OFF): MediaPipe
+  </text>
+  <text x="340" y="609" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • 21-point wrist/finger &amp; 33-point posture
+  </text>
+  <text x="340" y="626" fill="#d8b4fe" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • Zero-Cost Local Pre-Filtering
+  </text>
+
+  <!-- Arrow Col 2 -> Col 3 -->
+  <line x1="605" y1="380" x2="637" y2="380" stroke="#a78bfa" stroke-width="2.5" marker-end="url(#arrowViolet)" />
+
+  <!-- ==================== COLUMN 3: META MUSE SPARK AI ENGINE ==================== -->
+  <rect x="641" y="110" width="275" height="545" rx="12" fill="url(#metaGrad)" stroke="#8b5cf6" stroke-width="2" />
+  <rect x="641" y="110" width="275" height="42" rx="12" fill="#6d28d9" fill-opacity="0.45" />
+  <text x="778" y="136" text-anchor="middle" fill="#ddd6fe" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13.5" font-weight="800" letter-spacing="0.6">
+    3. META MUSE SPARK ENGINE
+  </text>
+
+  <!-- Meta Model Badge -->
+  <rect x="657" y="166" width="243" height="54" rx="8" fill="#2e1065" stroke="#a78bfa" stroke-width="1.5" />
+  <text x="778" y="188" text-anchor="middle" fill="#f5f3ff" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="800">
+    meta-models/muse-spark-open-1026
+  </text>
+  <text x="778" y="208" text-anchor="middle" fill="#c4b5fd" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11" font-weight="600">
+    Hosted on Baseten Serverless GPU Inference
+  </text>
+
+  <!-- Muse Capability 1 -->
+  <rect x="657" y="234" width="243" height="108" rx="8" fill="#1e293b" stroke="#6366f1" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="671" y="257" fill="#a5b4fc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Multi-Frame Temporal Vision
+  </text>
+  <text x="671" y="277" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Evaluates 4 chronological full-HD frames
+  </text>
+  <text x="671" y="295" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Plus polygon-masked Watch Zone crop
+  </text>
+  <text x="671" y="313" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Reads moving vehicle numbers &amp; bills
+  </text>
+  <text x="671" y="331" fill="#818cf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • Prevents single-frame motion blur misses
+  </text>
+
+  <!-- Muse Capability 2 -->
+  <rect x="657" y="356" width="243" height="108" rx="8" fill="#1e293b" stroke="#6366f1" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="671" y="379" fill="#a5b4fc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Strict Confidence &amp; Rule Gating
+  </text>
+  <text x="671" y="399" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Zero-shot natural language presets
+  </text>
+  <text x="671" y="417" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Enforces &gt;= 75% sitting/table certainty
+  </text>
+  <text x="671" y="435" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Rejects standing/walking false alarms
+  </text>
+  <text x="671" y="453" fill="#818cf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • Structured JSON Verdict + Risk (1-100)
+  </text>
+
+  <!-- Muse Capability 3 -->
+  <rect x="657" y="478" width="243" height="158" rx="8" fill="#1e293b" stroke="#6366f1" stroke-opacity="0.6" stroke-width="1.2" />
+  <text x="671" y="501" fill="#a5b4fc" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Autonomous Vision Co-Processors
+  </text>
+  <text x="671" y="523" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • OpenCV Spatial ROI Auto-Compiler
+  </text>
+  <text x="671" y="541" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+      Maps rule text to [x, y, w, h] zone
+  </text>
+  <text x="671" y="563" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • 24-Point Polygon Mask Extraction
+  </text>
+  <text x="671" y="581" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+      High-precision target contour overlay
+  </text>
+  <text x="671" y="603" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Natural Language Forensic Search
+  </text>
+  <text x="671" y="621" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+      Generates OpenCV Python filter code
+  </text>
+
+  <!-- Arrow Col 3 -> Col 4 -->
+  <line x1="916" y1="380" x2="948" y2="380" stroke="#34d399" stroke-width="2.5" marker-end="url(#arrowEmerald)" />
+
+  <!-- ==================== COLUMN 4: DISPATCH & FORENSICS ==================== -->
+  <rect x="952" y="110" width="224" height="545" rx="12" fill="#0f172a" stroke="#10b981" stroke-width="1.5" />
+  <rect x="952" y="110" width="224" height="42" rx="12" fill="#047857" fill-opacity="0.35" />
+  <text x="1064" y="136" text-anchor="middle" fill="#34d399" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13.5" font-weight="800" letter-spacing="0.6">
+    4. REAL-TIME DISPATCH
+  </text>
+
+  <!-- Dispatch Box 1: WhatsApp Cloud API -->
+  <rect x="966" y="168" width="196" height="175" rx="8" fill="#1e293b" stroke="#10b981" stroke-opacity="0.7" stroke-width="1.2" />
+  <text x="978" y="192" fill="#34d399" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    WhatsApp Cloud API v21.0
+  </text>
+  <text x="978" y="212" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Method B Binary Upload
+  </text>
+  <text x="978" y="230" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+      POST /{PHONE_ID}/media
+  </text>
+  <text x="978" y="250" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Instant Image + AI Verdict
+  </text>
+  <text x="978" y="268" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+      POST /{PHONE_ID}/messages
+  </text>
+  <text x="978" y="288" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Live UI ON/OFF Toggle
+  </text>
+  <text x="978" y="306" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Persistent Credentials
+  </text>
+  <text x="978" y="326" fill="#6ee7b7" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5" font-weight="600">
+    • 3 Alert Formatting Modes
+  </text>
+
+  <!-- Dispatch Box 2: Operator HUD -->
+  <rect x="966" y="358" width="196" height="135" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" />
+  <text x="978" y="382" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Tactical Control Room HUD
+  </text>
+  <text x="978" y="402" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Live Risk Score &amp; Badge
+  </text>
+  <text x="978" y="420" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Green ✓ NOTIFIED Badges
+  </text>
+  <text x="978" y="438" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Keyframe Evidence Gallery
+  </text>
+  <text x="978" y="456" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Saved Presets Manager
+  </text>
+  <text x="978" y="476" fill="#94a3b8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="10.5">
+    • Acoustic Siren Alarm
+  </text>
+
+  <!-- Dispatch Box 3: Forensic Storage -->
+  <rect x="966" y="508" width="196" height="128" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" />
+  <text x="978" y="532" fill="#f472b6" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12.5" font-weight="700">
+    Forensic Incident Vault
+  </text>
+  <text x="978" y="552" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Local JSON DB Persistence
+  </text>
+  <text x="978" y="570" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Timestamped Snapshots
+  </text>
+  <text x="978" y="588" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Natural Language Query
+  </text>
+  <text x="978" y="606" fill="#cbd5e1" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="11">
+    • Auto-Generated OpenCV Code
+  </text>
+
+  <!-- Bottom Summary Bar -->
+  <rect x="24" y="674" width="1152" height="62" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1.2" />
+  <text x="48" y="700" fill="#38bdf8" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12" font-weight="700">
+    KEY ARCHITECTURAL ADVANTAGE:
+  </text>
+  <text x="248" y="700" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12">
+    Edge spatial gating + 6×4 section locks filter 95%+ of redundant video frames locally in the browser before invoking
+  </text>
+  <text x="48" y="721" fill="#e2e8f0" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12">
+    Meta Muse Spark Open (meta-models/muse-spark-open-1026) with 10-second HD multi-frame temporal context for high-precision WhatsApp alerts.
+  </text>
+</svg>
