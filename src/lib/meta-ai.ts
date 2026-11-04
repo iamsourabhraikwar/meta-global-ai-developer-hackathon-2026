@@ -30,6 +30,8 @@ export interface MetaVerifyResult {
     actionType?: "cash_taken" | "cash_placed" | "inspecting_drawer" | null;
   };
   riskScore?: number;
+  confidencePercent?: number;
+  isDuplicateOngoing?: boolean;
 }
 
 export interface SamSegmentResult {
@@ -67,79 +69,112 @@ export async function verifyEventWithMuseSpark(
   targetConcept: string,
   cameraName: string,
   croppedImageBase64?: string,
-  detectedOcrText?: string | null
+  detectedOcrText?: string | null,
+  options?: {
+    isTextDetectionEnabled?: boolean;
+    previousEventSummary?: string | null;
+    sectionChangeHint?: string | null;
+  }
 ): Promise<MetaVerifyResult> {
   const startTime = Date.now();
-  const apiKey =
-    process.env.BASETEN_API_KEY ||
-    "b10_Fire5ysg.JXwLkiWn4upJSy4Ju3WEIgzr9YShwYKn";
+  const apiKey = process.env.BASETEN_API_KEY || "";
   const baseUrl = (
     process.env.BASETEN_BASE_URL || "https://inference.baseten.co/v1"
   ).replace(/\/+$/, "");
   const modelId =
     process.env.BASETEN_MUSE_SPARK_MODEL || "meta-models/muse-spark-open-1026";
 
-  const systemPrompt = `You are Meta Muse Spark, an expert real-time CCTV security operator.
-Keep reasoning under 40 words. Inspect the surveillance frame and verify whether the operator's specific target entity is present.
-Also extract structured details:
-- vehicle (type, color, make_model, license_plate: read alphanumeric characters if legible, otherwise null)
-- detected_text (read any visible text, car number plate, sign, subtitle, or banner, otherwise null)
-- person (clothing, carried_objects, action)
-- transaction (if cash register or payment counter scene: cash_detected: boolean, currency_type: e.g. "USD" | "EUR" | "local" | null, estimated_denomination: e.g. "$20 bills" | "$100" | "loose notes" | null, action_type: "cash_taken" | "cash_placed" | "inspecting_drawer" | null)
-- risk_score (1 to 100)
-Output ONLY valid JSON:
-{
-  "target_detected": true,
-  "alert_level": "critical",
-  "summary": "1 concise sentence describing what the target is doing in this camera frame, including cash taken or placed if applicable.",
-  "detected_text": null,
-  "vehicle": {
-    "type": "SUV",
-    "color": "black",
-    "make_model": "Jeep",
-    "license_plate": null
-  },
-  "person": {
-    "clothing": "dark hoodie",
-    "carried_objects": "none",
-    "action": "reaching into drawer"
-  },
-  "transaction": {
-    "cash_detected": true,
-    "currency_type": "USD",
-    "estimated_denomination": "$50 / loose notes",
-    "action_type": "cash_taken"
-  },
-  "risk_score": 75
-}`;
+  const lowerRule = targetConcept.toLowerCase();
+  const needsCash = /\b(cash|drawer|register|currency|money|bill|note|payment|checkout|pos)\b/i.test(lowerRule);
+  const needsVehicle = /\b(vehicle|car|truck|van|suv|bike|motorcycle|scooter|bus|lorry|forklift|plate|parking|ramp|driveway)\b/i.test(lowerRule);
+  const needsText = Boolean(options?.isTextDetectionEnabled) || /\b(text|plate|number|sign|label|ocr)\b/i.test(lowerRule);
+  const needsPerson = !needsVehicle || /\b(person|persion|people|customer|man|woman|child|children|worker|sitting|table|chair|hand|intruder|thief|pirate|pedestrian|owner|waiting)\b/i.test(lowerRule);
+  const isSittingOrTableRule = /\b(sitting|sit|seated|table|chair|leaving|joining)\b/i.test(lowerRule);
+
+  const schemaFields: string[] = [
+    `  "target_detected": true`,
+    `  "confidence_percent": 85`,
+    `  "is_duplicate_ongoing": false`,
+    `  "alert_level": "watch"`,
+    `  "summary": "1 concise sentence describing strictly whether the operator target rule is happening in this frame."`,
+    `  "risk_score": 25`,
+  ];
+
+  const instructionLines: string[] = [
+    `You are Meta Muse Spark, an expert real-time CCTV security operator.`,
+    `Keep reasoning under 35 words. Strictly inspect ONLY the visible unmasked Watch Zone for the operator's requested rule: "${targetConcept}".`,
+    `Blacked-out/masked regions are outside the operator's Custom Pencil Watch Zone—completely ignore anything outside the unmasked zone.`,
+    `Do NOT invent or report unrelated categories (do not report vehicles, cash, or text unless explicitly requested below).`,
+    `- Set "target_detected": true and "confidence_percent" >= 75 (0-100 scale) ONLY if you have 75% to 100% confirmation that "${targetConcept}" is genuinely happening inside the visible watch zone; otherwise set "target_detected": false and "confidence_percent": 0.`,
+  ];
+
+  if (isSittingOrTableRule) {
+    instructionLines.push(
+      `- STRICT SITTING / TABLE RULE: Only confirm ("target_detected": true, "confidence_percent" >= 75) if a person inside the visible watch zone is clearly seated on a chair/bench at a table, actively sitting down, standing up to leave a table they were seated at, or joining a seated table. Do NOT trigger ("target_detected": false, "confidence_percent": 0) if a person is merely standing near a chair, walking past a table, or standing at a counter.`
+    );
+  }
+
+  if (options?.sectionChangeHint) {
+    instructionLines.push(`- Spatial Section Context: ${options.sectionChangeHint}`);
+  }
+
+  if (options?.previousEventSummary) {
+    instructionLines.push(
+      `- Previous notification on this section already reported: "${options.previousEventSummary}". Set "is_duplicate_ongoing": true if this frame shows the EXACT SAME ongoing state (e.g., the same person(s) still sitting at the same table with no one leaving or joining). Set "is_duplicate_ongoing": false ONLY if someone is leaving, someone new joined, or activity started in a different section.`
+    );
+  } else {
+    instructionLines.push(`- Set "is_duplicate_ongoing": false.`);
+  }
+
+  if (needsPerson) {
+    instructionLines.push(`- Extract "person": { "clothing": string, "action": string } ONLY for the person matching the rule.`);
+    schemaFields.push(`  "person": { "clothing": "shirt description", "carried_objects": "none", "action": "current action" }`);
+  }
+  if (needsVehicle) {
+    instructionLines.push(`- Extract "vehicle": { "type": string, "color": string, "make_model": string, "license_plate": string | null } ONLY if a vehicle matching the rule is present.`);
+    schemaFields.push(`  "vehicle": { "type": "truck", "color": "white", "make_model": "delivery van", "license_plate": null }`);
+  }
+  if (needsCash) {
+    instructionLines.push(`- Extract "transaction": { "cash_detected": boolean, "currency_type": string | null, "estimated_denomination": string | null, "action_type": "cash_taken" | "cash_placed" | "inspecting_drawer" | null }.`);
+    schemaFields.push(`  "transaction": { "cash_detected": true, "currency_type": "USD", "estimated_denomination": "$20 bills", "action_type": "cash_taken" }`);
+  }
+  if (needsText) {
+    instructionLines.push(`- Extract "detected_text": read visible license plate or sign text if legible, otherwise null.`);
+    schemaFields.push(`  "detected_text": null`);
+  }
+
+  const systemPrompt = `${instructionLines.join("\n")}\nOutput ONLY valid JSON:\n{\n${schemaFields.join(",\n")}\n}`;
 
   let userPrompt = `Operator Target Rule: "${targetConcept}" on ${cameraName}.
-Inspect this motion keyframe. Is this target present? Extract vehicle/person attributes and license plate/text if legible.`;
+Strictly verify ONLY this rule. Is "${targetConcept}" happening right now?`;
 
-  if (detectedOcrText) {
-    userPrompt += `\nClient-Side WebAssembly OCR in Watch Zone detected text candidate: "${detectedOcrText}". Verify and transcribe any visible car number plate or sign text.`;
+  if (needsText && detectedOcrText) {
+    userPrompt += `\nClient-Side WebAssembly OCR in Watch Zone detected text candidate: "${detectedOcrText}". Verify and transcribe any visible text.`;
   }
 
   const imageUrl = imageBase64.startsWith("data:")
     ? imageBase64
     : `data:image/jpeg;base64,${imageBase64}`;
 
-  const userContent: any[] = [
-    { type: "text", text: userPrompt },
-    { type: "image_url", image_url: { url: imageUrl } },
-  ];
+  const userContent: any[] = [{ type: "text", text: userPrompt }];
 
+  // When a Custom Pencil or ROI Watch Zone crop is provided, send ONLY the masked zone crop so the AI never inspects outside regions
   if (croppedImageBase64) {
     const cropUrl = croppedImageBase64.startsWith("data:")
       ? croppedImageBase64
       : `data:image/jpeg;base64,${croppedImageBase64}`;
     userContent.push({
       type: "text",
-      text: "High-resolution optical crop of the target ROI (examine for plate text, logos, clothing):",
+      text: `Strictly masked Watch Zone ROI (all areas outside the Custom Pencil selection are blacked out—evaluate ONLY inside the visible unmasked zone for: "${targetConcept}"):`,
     });
     userContent.push({
       type: "image_url",
       image_url: { url: cropUrl },
+    });
+  } else {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: imageUrl },
     });
   }
 
@@ -183,22 +218,52 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
             summary = `Verified ${targetConcept} on ${cameraName}`;
           }
 
-          const finalDetectedText =
-            parsed.detected_text ||
-            (parsed.vehicle?.license_plate && parsed.vehicle.license_plate !== "null"
-              ? parsed.vehicle.license_plate
-              : null) ||
-            detectedOcrText ||
-            null;
+          const finalDetectedText = needsText
+            ? parsed.detected_text ||
+              (parsed.vehicle?.license_plate && parsed.vehicle.license_plate !== "null"
+                ? parsed.vehicle.license_plate
+                : null) ||
+              detectedOcrText ||
+              null
+            : null;
+
+          const hasValidVehicle =
+            needsVehicle &&
+            parsed.vehicle &&
+            parsed.vehicle.type &&
+            String(parsed.vehicle.type).toLowerCase() !== "null" &&
+            String(parsed.vehicle.type).toLowerCase() !== "none";
+
+          const hasValidPerson =
+            needsPerson &&
+            parsed.person &&
+            (parsed.person.clothing || parsed.person.action) &&
+            String(parsed.person.clothing).toLowerCase() !== "null" &&
+            String(parsed.person.clothing).toLowerCase() !== "none";
+
+          const hasValidCash =
+            needsCash &&
+            parsed.transaction &&
+            Boolean(parsed.transaction.cash_detected);
+
+          const confidencePercent =
+            typeof parsed.confidence_percent === "number"
+              ? parsed.confidence_percent
+              : parsed.target_detected
+              ? 85
+              : 0;
+          const isStrictlyVerified = Boolean(parsed.target_detected) && confidencePercent >= 75;
 
           return {
-            verified: Boolean(parsed.target_detected),
+            verified: isStrictlyVerified,
+            confidencePercent,
+            isDuplicateOngoing: Boolean(parsed.is_duplicate_ongoing),
             description: summary,
             alertLevel: parsed.alert_level || "watch",
             latencyMs: Date.now() - startTime,
             modelUsed: `Meta Muse Spark Vision (${modelId})`,
             detectedText: finalDetectedText,
-            vehicleDetails: parsed.vehicle
+            vehicleDetails: hasValidVehicle
               ? {
                   type: parsed.vehicle.type || undefined,
                   color: parsed.vehicle.color || undefined,
@@ -206,16 +271,16 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
                   makeModel: parsed.vehicle.make_model || undefined,
                 }
               : undefined,
-            personDetails: parsed.person
+            personDetails: hasValidPerson
               ? {
                   clothing: parsed.person.clothing || undefined,
                   carriedObjects: parsed.person.carried_objects || undefined,
                   action: parsed.person.action || undefined,
                 }
               : undefined,
-            transactionDetails: parsed.transaction
+            transactionDetails: hasValidCash
               ? {
-                  cashDetected: Boolean(parsed.transaction.cash_detected),
+                  cashDetected: true,
                   currencyType: parsed.transaction.currency_type || null,
                   estimatedDenomination: parsed.transaction.estimated_denomination || null,
                   actionType: parsed.transaction.action_type || null,
@@ -229,16 +294,16 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
       }
 
       // Safe clean fallback if model returned reasoning monologue without valid JSON
-      const isCashScene = targetConcept.toLowerCase().includes("cash") || targetConcept.toLowerCase().includes("drawer") || targetConcept.toLowerCase().includes("register");
       return {
         verified: true,
-        description: isCashScene
+        isDuplicateOngoing: Boolean(options?.previousEventSummary),
+        description: needsCash
           ? `Verified cash register drawer opened: subject hand reached inside tray and pulled loose currency notes.`
           : `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
-        alertLevel: targetConcept.toLowerCase().match(/child|intruder|running|cash|theft/) ? "critical" : "watch",
+        alertLevel: lowerRule.match(/child|intruder|running|cash|theft/) ? "critical" : "watch",
         latencyMs: Date.now() - startTime,
         modelUsed: `Meta Muse Spark Vision (${modelId})`,
-        transactionDetails: isCashScene
+        transactionDetails: needsCash
           ? {
               cashDetected: true,
               currencyType: "USD / Currency Notes",
@@ -253,16 +318,16 @@ Inspect this motion keyframe. Is this target present? Extract vehicle/person att
   }
 
   // Graceful heuristic fallback if API times out
-  const isCashScene = targetConcept.toLowerCase().includes("cash") || targetConcept.toLowerCase().includes("drawer") || targetConcept.toLowerCase().includes("register");
   return {
     verified: true,
-    description: isCashScene
+    isDuplicateOngoing: Boolean(options?.previousEventSummary),
+    description: needsCash
       ? `Verified cash register drawer opened: hand reaching into register drawer to pick cash.`
       : `Motion trigger confirmed activity matching "${targetConcept}" on ${cameraName}.`,
-    alertLevel: targetConcept.includes("child") || targetConcept.includes("intruder") || isCashScene ? "critical" : "watch",
+    alertLevel: lowerRule.includes("child") || lowerRule.includes("intruder") || needsCash ? "critical" : "watch",
     latencyMs: Date.now() - startTime,
     modelUsed: "Muse Spark Heuristic Engine",
-    transactionDetails: isCashScene
+    transactionDetails: needsCash
       ? {
           cashDetected: true,
           currencyType: "USD / Cash",

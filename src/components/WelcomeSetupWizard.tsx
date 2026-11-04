@@ -40,7 +40,7 @@ export default function WelcomeSetupWizard({
   const [step, setStep] = useState<number>(1);
   const [provider, setProvider] = useState<string>("baseten");
   const [apiKey, setApiKey] = useState<string>(
-    initialConfig?.basetenApiKey || "b10_Fire5ysg.JXwLkiWn4upJSy4Ju3WEIgzr9YShwYKn"
+    initialConfig?.basetenApiKey || ""
   );
   const [baseUrl, setBaseUrl] = useState<string>(
     initialConfig?.baseUrl || "https://inference.baseten.co/v1"
@@ -483,6 +483,7 @@ export default function WelcomeSetupWizard({
                 </span>
                 <div className="flex flex-col gap-1.5">
                   {[
+                    "🪑 person sitting on table or chair, leaving table, or someone joining the table",
                     "cash drawer opened or hand reaching into register drawer to pick cash",
                     "customer waiting at empty table or dine and dash without paying",
                     "porch pirate package theft or car door handle prowling in driveway",

@@ -56,6 +56,16 @@ export default function AddPresetModal({
   // Quick preset templates
   const quickTemplates = [
     {
+      label: "🪑 Restaurant Table & Chair (Sitting / Leaving / Joining)",
+      obj: "person sitting on table or chair",
+      action: "🪑 person sitting on table or chair, leaving table, or someone joining the table",
+      condition: "trigger when a person sits at a table/chair, leaves the table, or when another person joins the table",
+      env: "Restaurant Patio & Dining Tables",
+      ocr: false,
+      text: "",
+      priority: "high" as const,
+    },
+    {
       label: "💵 Cash Register / Counter (MediaPipe Hand Gate)",
       obj: "cash drawer and hand transactions",
       action: "cash drawer opened or hand reaching into register; inspect visible currency notes, denomination amount, and cash taken vs placed",

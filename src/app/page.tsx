@@ -104,6 +104,40 @@ export default function LiveCctvOperatorPage() {
   const [motionThreshold, setMotionThreshold] = useState<number>(6.5);
   const prevFrameData = useRef<Uint8ClampedArray | null>(null);
   const lastTriggerRef = useRef<number>(0);
+  const isTriggerInFlightRef = useRef<boolean>(false);
+  const quietFramesCountRef = useRef<number>(0);
+  const lastNotifiedSummaryRef = useRef<Record<string, { rule: string; summary: string; time: number }>>({});
+  // Spatial Sub-Section (6x4 Micro-Grid) State Gating: remembers which section of Full Frame / Custom Pencil already notified
+  const notifiedSectionsRef = useRef<
+    Record<
+      string,
+      Record<
+        string,
+        {
+          cellKey: string;
+          col: number;
+          row: number;
+          cx: number;
+          cy: number;
+          rule: string;
+          summary: string;
+          notifiedAt: number;
+          quietTicks: number;
+        }
+      >
+    >
+  >({});
+  const [notifiedSubZonesUI, setNotifiedSubZonesUI] = useState<
+    Array<{
+      cellKey: string;
+      col: number;
+      row: number;
+      cx: number;
+      cy: number;
+      summary: string;
+      notifiedAt: number;
+    }>
+  >([]);
 
   // Capture current frame from HTML5 video element as Base64 JPEG
   const captureCurrentFrameBase64 = (): string | null => {
@@ -122,27 +156,47 @@ export default function LiveCctvOperatorPage() {
     }
   };
 
-  // Optimization 1: Native High-Resolution Optical Crop of ROI (preserves sharp details like license plates)
+  // Optimization 1: Native High-Resolution Optical Crop of ROI (strictly masks out everything outside Custom Pencil polygon)
   const captureRoiCropBase64 = (zone?: [number, number, number, number] | null): string | null => {
     const video = videoRef.current;
     if (!video || video.readyState < 2) return null;
     const targetZone = zone || roiZone;
-    if (!targetZone) return captureCurrentFrameBase64();
+    if (!targetZone && (!roiPolygon || roiPolygon.length < 3)) return null;
     try {
       const vw = video.videoWidth || 1280;
       const vh = video.videoHeight || 720;
-      const sx = Math.floor((targetZone[0] / 100) * vw);
-      const sy = Math.floor((targetZone[1] / 100) * vh);
-      const sw = Math.max(32, Math.ceil(((targetZone[2] - targetZone[0]) / 100) * vw));
-      const sh = Math.max(32, Math.ceil(((targetZone[3] - targetZone[1]) / 100) * vh));
+      const z = targetZone || [0, 0, 100, 100];
+      const sx = Math.floor((z[0] / 100) * vw);
+      const sy = Math.floor((z[1] / 100) * vh);
+      const sw = Math.max(32, Math.ceil(((z[2] - z[0]) / 100) * vw));
+      const sh = Math.max(32, Math.ceil(((z[3] - z[1]) / 100) * vh));
 
       const off = document.createElement("canvas");
       off.width = sw;
       off.height = sh;
       const ctx = off.getContext("2d");
       if (!ctx) return null;
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-      return off.toDataURL("image/jpeg", 0.72).split(",")[1];
+
+      // If Custom Pencil / Polygon is active, strictly black out every pixel outside the drawn polygon
+      if (roiPolygon && roiPolygon.length >= 3) {
+        ctx.fillStyle = "#030712";
+        ctx.fillRect(0, 0, sw, sh);
+        ctx.save();
+        ctx.beginPath();
+        roiPolygon.forEach((pt, idx) => {
+          const px = (pt.x / 100) * vw - sx;
+          const py = (pt.y / 100) * vh - sy;
+          if (idx === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+      }
+      return off.toDataURL("image/jpeg", 0.75).split(",")[1];
     } catch (e) {
       return null;
     }
@@ -197,6 +251,7 @@ export default function LiveCctvOperatorPage() {
 
   // Dynamic Target Presets State (User can delete or add custom presets)
   const [targetPresets, setTargetPresets] = useState<string[]>([
+    "🪑 person sitting on table or chair, leaving table, or someone joining the table",
     "cash drawer opened or hand reaching into register: inspect currency amount and cash-in/cash-out",
     "customer waiting at empty table or dine and dash without paying",
     "porch pirate package theft or car door handle prowling in driveway",
@@ -274,8 +329,9 @@ export default function LiveCctvOperatorPage() {
     return null;
   };
 
-  // WhatsApp Alert Configuration State (Recipient: 917999475243)
-  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("917999475243");
+  // WhatsApp Alert Configuration State
+  const [whatsAppEnabled, setWhatsAppEnabled] = useState<boolean>(true);
+  const [whatsAppRecipient, setWhatsAppRecipient] = useState<string>("");
   const [whatsAppAccessToken, setWhatsAppAccessToken] = useState<string>("");
   const [whatsAppMode, setWhatsAppMode] = useState<"full_reasoning" | "summary_only" | "image_only">("full_reasoning");
   const [showWhatsAppSettings, setShowWhatsAppSettings] = useState<boolean>(false);
@@ -287,27 +343,83 @@ export default function LiveCctvOperatorPage() {
   const [showCamFeedConfig, setShowCamFeedConfig] = useState<boolean>(false);
   const [camFeedUrlInput, setCamFeedUrlInput] = useState<string>("");
 
+  const persistWhatsAppSettings = ( next: {
+    enabled?: boolean;
+    recipient?: string;
+    token?: string;
+    mode?: "full_reasoning" | "summary_only" | "image_only";
+  }) => {
+    const finalEnabled = next.enabled !== undefined ? next.enabled : whatsAppEnabled;
+    const finalRecipient = next.recipient !== undefined ? next.recipient : whatsAppRecipient;
+    const finalToken = next.token !== undefined ? next.token : whatsAppAccessToken;
+    const finalMode = next.mode !== undefined ? next.mode : whatsAppMode;
+
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          "cctv_whatsapp_settings",
+          JSON.stringify({
+            whatsAppEnabled: finalEnabled,
+            whatsAppRecipient: finalRecipient,
+            whatsAppAccessToken: finalToken,
+            whatsAppMode: finalMode,
+          })
+        );
+      } catch (e) {}
+    }
+
+    fetch("/api/cctv/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        whatsAppEnabled: finalEnabled,
+        whatsAppRecipient: finalRecipient,
+        whatsAppAccessToken: finalToken || undefined,
+        whatsAppMode: finalMode,
+      }),
+    }).catch(() => {});
+  };
+
   useEffect(() => {
-    // Load persisted camera stream overrides
+    // Load persisted camera stream overrides & WhatsApp settings from localStorage
+    let localWaLoaded = false;
     if (typeof window !== "undefined") {
       try {
         const savedOverrides = localStorage.getItem("cctv_camera_stream_overrides");
         if (savedOverrides) {
           setCameraStreamOverrides(JSON.parse(savedOverrides));
         }
+        const savedWa = localStorage.getItem("cctv_whatsapp_settings");
+        if (savedWa) {
+          const parsedWa = JSON.parse(savedWa);
+          if (typeof parsedWa.whatsAppEnabled === "boolean") setWhatsAppEnabled(parsedWa.whatsAppEnabled);
+          if (parsedWa.whatsAppRecipient) setWhatsAppRecipient(parsedWa.whatsAppRecipient);
+          if (parsedWa.whatsAppAccessToken) setWhatsAppAccessToken(parsedWa.whatsAppAccessToken);
+          if (parsedWa.whatsAppMode) setWhatsAppMode(parsedWa.whatsAppMode);
+          localWaLoaded = true;
+        }
       } catch (e) {}
     }
 
-    // Load persisted operator configuration
+    // Load persisted operator configuration from server
     fetch("/api/cctv/config")
       .then((r) => r.json())
       .then((res) => {
-        if (res?.config?.whatsAppRecipient) {
-          const raw = res.config.whatsAppRecipient;
-          if (raw && !raw.includes("@")) {
-            setWhatsAppRecipient(raw);
-          } else {
-            setWhatsAppRecipient("917999475243");
+        if (res?.config) {
+          if (!localWaLoaded && typeof res.config.whatsAppEnabled === "boolean") {
+            setWhatsAppEnabled(res.config.whatsAppEnabled);
+          }
+          if (res.config.whatsAppRecipient && !localWaLoaded) {
+            const raw = res.config.whatsAppRecipient;
+            if (raw && !raw.includes("@")) {
+              setWhatsAppRecipient(raw);
+            }
+          }
+          if (res.config.whatsAppAccessToken && !localWaLoaded) {
+            setWhatsAppAccessToken(res.config.whatsAppAccessToken);
+          }
+          if (res.config.whatsAppMode && !localWaLoaded) {
+            setWhatsAppMode(res.config.whatsAppMode);
           }
         }
       })
@@ -664,7 +776,7 @@ export default function LiveCctvOperatorPage() {
   };
 
   // Save customized trigger rule for current camera & auto-compile OpenCV ROI with Meta Muse Spark
-  const handleSaveCameraRule = async (customRule?: string) => {
+  const handleSaveCameraRule = async (customRule?: string, isFromToggle: boolean = false) => {
     const ruleToSave = (customRule ?? targetConcept).trim();
     if (!ruleToSave) return;
     setTargetConcept(ruleToSave);
@@ -673,11 +785,18 @@ export default function LiveCctvOperatorPage() {
       [selectedCamId]: ruleToSave,
     }));
 
-    // Auto-add customized rule into targetPresets if not already present
-    setTargetPresets((prev) => {
-      const exists = prev.some((p) => p.toLowerCase() === ruleToSave.toLowerCase());
-      return exists ? prev : [ruleToSave, ...prev];
-    });
+    // Reset deduplication memory for this camera when rule changes so new rule triggers fresh
+    delete lastNotifiedSummaryRef.current[selectedCamId];
+    delete notifiedSectionsRef.current[selectedCamId];
+    setNotifiedSubZonesUI([]);
+
+    // Auto-add customized single rule into targetPresets if not already present (never add combined ", OR " strings)
+    if (!isFromToggle && !/,\s*OR\s+/.test(ruleToSave)) {
+      setTargetPresets((prev) => {
+        const exists = prev.some((p) => p.trim().toLowerCase() === ruleToSave.toLowerCase());
+        return exists ? prev : [ruleToSave, ...prev];
+      });
+    }
 
     setIsCompilingRule(true);
     setIsSavedRule(false);
@@ -698,7 +817,8 @@ export default function LiveCctvOperatorPage() {
 
       const data = await res.json();
       if (data.success) {
-        if (Array.isArray(data.roiZone)) {
+        // Preserve user's hand-drawn Custom Pencil polygon if active; otherwise apply AI Vision ROI box
+        if (Array.isArray(data.roiZone) && (!roiPolygon || roiPolygon.length < 3)) {
           setRoiZone(data.roiZone as [number, number, number, number]);
           setRoiZoneLabel(`AI Vision ROI: [${data.roiZone.join(", ")}%]`);
         }
@@ -722,35 +842,47 @@ export default function LiveCctvOperatorPage() {
     }
   };
 
-  // Multi-preset rule selection: clicking toggles rule inclusion (OR logic) for Meta Muse Spark
+  // Preset rule selection: split strictly on ", OR " (uppercase OR after comma) so lowercase "or" inside a preset is never broken
   const handleTogglePreset = (preset: string) => {
-    const isCurrentlyActive = targetConcept
-      .toLowerCase()
-      .split(/\s*,\s*OR\s*|\s*OR\s*/i)
-      .some((part) => part.trim().toLowerCase() === preset.toLowerCase());
+    const cleanPreset = preset.trim();
+    const currentParts = targetConcept
+      .split(/,\s*OR\s+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    const isCurrentlyActive = currentParts.some(
+      (part) => part.toLowerCase() === cleanPreset.toLowerCase()
+    );
 
     let newCombinedRule = "";
     if (isCurrentlyActive) {
-      // Deselect preset
-      const remaining = targetConcept
-        .split(/\s*,\s*OR\s*|\s*OR\s*/i)
-        .map((p) => p.trim())
-        .filter((p) => p && p.toLowerCase() !== preset.toLowerCase());
-      newCombinedRule = remaining.length > 0 ? remaining.join(", OR ") : currentCam.defaultTarget || "";
+      // Deselect this preset
+      const remaining = currentParts.filter(
+        (p) => p.toLowerCase() !== cleanPreset.toLowerCase()
+      );
+      newCombinedRule =
+        remaining.length > 0 ? remaining.join(", OR ") : currentCam.defaultTarget || "";
     } else {
-      // Select preset
-      const existingParts = targetConcept
-        .split(/\s*,\s*OR\s*|\s*OR\s*/i)
-        .map((p) => p.trim())
-        .filter((p) => p && p.toLowerCase() !== (currentCam.defaultTarget || "").toLowerCase());
+      // Select only this preset (or combine if user already explicitly selected another preset from the list)
+      const defaultRuleLower = (currentCam.defaultTarget || "").trim().toLowerCase();
+      const activeExplicitPresets = currentParts.filter(
+        (p) =>
+          p.toLowerCase() !== defaultRuleLower &&
+          targetPresets.some((tp) => tp.trim().toLowerCase() === p.toLowerCase())
+      );
 
-      if (!existingParts.some((p) => p.toLowerCase() === preset.toLowerCase())) {
-        existingParts.push(preset);
+      // Single-rule by default unless user is explicitly toggling presets
+      if (activeExplicitPresets.length === 0) {
+        newCombinedRule = cleanPreset;
+      } else {
+        if (!activeExplicitPresets.some((p) => p.toLowerCase() === cleanPreset.toLowerCase())) {
+          activeExplicitPresets.push(cleanPreset);
+        }
+        newCombinedRule = activeExplicitPresets.join(", OR ");
       }
-      newCombinedRule = existingParts.join(", OR ");
     }
 
-    handleSaveCameraRule(newCombinedRule);
+    handleSaveCameraRule(newCombinedRule, true);
   };
 
   // Camera-filtered events and general calculations
@@ -910,15 +1042,35 @@ export default function LiveCctvOperatorPage() {
           let changedPixels = 0;
           const mask = polygonMaskRef.current;
 
+          // 6x4 Spatial Sub-Section Grid across Full Frame / Custom Pencil Zone
+          const GRID_COLS = 6;
+          const GRID_ROWS = 4;
+          const cellChanged = new Int32Array(GRID_COLS * GRID_ROWS);
+          const cellDiffSum = new Float32Array(GRID_COLS * GRID_ROWS);
+          const cellMaskCount = new Int32Array(GRID_COLS * GRID_ROWS);
+          const cellMaskSumX = new Float32Array(GRID_COLS * GRID_ROWS);
+          const cellMaskSumY = new Float32Array(GRID_COLS * GRID_ROWS);
+          const cellChangedSumX = new Float32Array(GRID_COLS * GRID_ROWS);
+          const cellChangedSumY = new Float32Array(GRID_COLS * GRID_ROWS);
+
           for (let y = 0; y < rh; y++) {
             for (let x = 0; x < rw; x++) {
               const localIdx = (y * rw + x) * 4;
-              const globalIdx = (ry1 + y) * sampleW + (rx1 + x);
+              const gx = rx1 + x;
+              const gy = ry1 + y;
+              const globalIdx = gy * sampleW + gx;
 
               // Custom pencil shape gating: If user traced a custom road or shape, strictly ignore outside pixels!
               if (mask && !mask[globalIdx]) {
                 continue;
               }
+
+              const col = Math.min(GRID_COLS - 1, Math.floor((gx / sampleW) * GRID_COLS));
+              const row = Math.min(GRID_ROWS - 1, Math.floor((gy / sampleH) * GRID_ROWS));
+              const cIdx = row * GRID_COLS + col;
+              cellMaskCount[cIdx] += 1;
+              cellMaskSumX[cIdx] += gx;
+              cellMaskSumY[cIdx] += gy;
 
               const g1 = imgData[localIdx] * 0.299 + imgData[localIdx + 1] * 0.587 + imgData[localIdx + 2] * 0.114;
               const g2 = prevFrameData.current[localIdx] * 0.299 + prevFrameData.current[localIdx + 1] * 0.587 + prevFrameData.current[localIdx + 2] * 0.114;
@@ -926,30 +1078,161 @@ export default function LiveCctvOperatorPage() {
               if (d > 10) {
                 changedPixels++;
                 diffSum += d;
+
+                cellChanged[cIdx] += 1;
+                cellDiffSum[cIdx] += d;
+                cellChangedSumX[cIdx] += gx;
+                cellChangedSumY[cIdx] += gy;
               }
             }
           }
 
-          // Intelligent surveillance motion score:
-          // A pedestrian occupying ~20-50 pixels in a wide surveillance view (CAM-03)
-          // must produce a trigger score (e.g. 8.0 - 12.0) rather than being diluted by 4,400 static background pixels!
           let score = 0.0;
           if (changedPixels >= 6) {
             const avgDelta = diffSum / changedPixels;
-            // Cluster component: scales with moving target mass
             const clusterScore = Math.min(25, changedPixels * 0.28);
-            // Contrast/intensity component: distinct object motion boosts confidence
             const intensityScore = Math.min(8, (avgDelta / 20) * 3.5);
             score = Math.round((clusterScore + intensityScore) * 10) / 10;
           }
 
           setCurrentMotionScore(score);
 
+          // Evaluate each of the 24 spatial sub-sections independently (strictly inside Custom Pencil mask)
           const now = Date.now();
-          // Automatic Trigger when motion crosses sensitivity threshold!
-          if (score >= motionThreshold && now - lastTriggerRef.current > 7500) {
+          const camSections = notifiedSectionsRef.current[selectedCamId] || {};
+          const activeLockedList = Object.values(camSections).filter(
+            (s) => s.rule.toLowerCase() === targetConcept.toLowerCase()
+          );
+
+          // High-motion spike threshold for detecting when a seated person stands up to leave or someone new joins
+          const highMotionLeaveOrJoinSpike = Math.max(motionThreshold * 2.1, 13.5);
+
+          let bestTriggerSection: {
+            cellKey: string;
+            col: number;
+            row: number;
+            cx: number;
+            cy: number;
+            score: number;
+            isMajorSectionChange: boolean;
+            previousSummary?: string;
+          } | null = null;
+
+          let sectionsChanged = false;
+
+          for (let r = 0; r < GRID_ROWS; r++) {
+            for (let c = 0; c < GRID_COLS; c++) {
+              const cIdx = r * GRID_COLS + c;
+              // When Custom Pencil mask is active, ignore any grid cell that barely touches the border (<35 pixels inside polygon)
+              if (mask && cellMaskCount[cIdx] < 35) {
+                continue;
+              }
+
+              const cPixels = cellChanged[cIdx];
+              let cellScore = 0;
+              if (cPixels >= 5) {
+                const cAvg = cellDiffSum[cIdx] / cPixels;
+                const cCluster = Math.min(25, cPixels * 0.45);
+                const cIntensity = Math.min(8, (cAvg / 20) * 3.5);
+                cellScore = Math.round((cCluster + cIntensity) * 10) / 10;
+              }
+
+              const cellKey = `${c}_${r}`;
+              const exactLocked = camSections[cellKey];
+              if (exactLocked) {
+                if (cellScore < 1.5) {
+                  exactLocked.quietTicks += 1;
+                  // Unlock this section if it remains completely still/empty for ~20 seconds
+                  if (exactLocked.quietTicks >= 55) {
+                    delete camSections[cellKey];
+                    sectionsChanged = true;
+                  }
+                } else {
+                  exactLocked.quietTicks = 0;
+                }
+              }
+
+              // Compute exact centroid strictly inside the Custom Pencil polygon (never use outside cell center)
+              const centroidGx =
+                cPixels >= 5
+                  ? cellChangedSumX[cIdx] / cPixels
+                  : cellMaskCount[cIdx] > 0
+                  ? cellMaskSumX[cIdx] / cellMaskCount[cIdx]
+                  : ((c + 0.5) / GRID_COLS) * sampleW;
+              const centroidGy =
+                cPixels >= 5
+                  ? cellChangedSumY[cIdx] / cPixels
+                  : cellMaskCount[cIdx] > 0
+                  ? cellMaskSumY[cIdx] / cellMaskCount[cIdx]
+                  : ((r + 0.5) / GRID_ROWS) * sampleH;
+
+              if (mask) {
+                const cCheckIdx =
+                  Math.min(sampleH - 1, Math.max(0, Math.round(centroidGy))) * sampleW +
+                  Math.min(sampleW - 1, Math.max(0, Math.round(centroidGx)));
+                if (!mask[cCheckIdx]) {
+                  continue;
+                }
+              }
+
+              const cx = Math.round((centroidGx / sampleW) * 100);
+              const cy = Math.round((centroidGy / sampleH) * 100);
+
+              // Check if this sub-section (or touching table cell within 1 grid step) already sent a notification
+              const coveringLocked = activeLockedList.find(
+                (s) => Math.abs(s.col - c) <= 1 && Math.abs(s.row - r) <= 1
+              );
+
+              if (coveringLocked) {
+                // Already notified this section! Skip normal sitting movements.
+                // ONLY re-trigger if after >18s there is a major motion spike (person leaving or new person joining the table)
+                if (
+                  now - coveringLocked.notifiedAt > 18000 &&
+                  cellScore >= highMotionLeaveOrJoinSpike
+                ) {
+                  if (!bestTriggerSection || cellScore > bestTriggerSection.score) {
+                    bestTriggerSection = {
+                      cellKey: coveringLocked.cellKey,
+                      col: coveringLocked.col,
+                      row: coveringLocked.row,
+                      cx: coveringLocked.cx,
+                      cy: coveringLocked.cy,
+                      score: cellScore,
+                      isMajorSectionChange: true,
+                      previousSummary: coveringLocked.summary,
+                    };
+                  }
+                }
+              } else {
+                // Un-notified sub-section! Trigger normally when motion crosses sensitivity threshold
+                if (cellScore >= motionThreshold) {
+                  if (!bestTriggerSection || cellScore > bestTriggerSection.score) {
+                    bestTriggerSection = {
+                      cellKey,
+                      col: c,
+                      row: r,
+                      cx,
+                      cy,
+                      score: cellScore,
+                      isMajorSectionChange: false,
+                    };
+                  }
+                }
+              }
+            }
+          }
+
+          if (sectionsChanged) {
+            setNotifiedSubZonesUI(Object.values(camSections));
+          }
+
+          if (
+            bestTriggerSection &&
+            !isTriggerInFlightRef.current &&
+            now - lastTriggerRef.current > 7500
+          ) {
             lastTriggerRef.current = now;
-            handleTriggerMotionEvent(score);
+            handleTriggerMotionEvent(bestTriggerSection.score, true, bestTriggerSection);
           }
         }
 
@@ -1192,6 +1475,66 @@ export default function LiveCctvOperatorPage() {
             ctx.fillText("SAM 3.1 TARGET", bx + 6, Math.max(14, by - 8));
             ctx.restore();
           }
+
+          // 5. Draw Notified Spatial Sub-Sections (Strictly clipped inside Custom Pencil polygon so circles never appear outside)
+          if (notifiedSubZonesUI.length > 0 && !isDrawingZone) {
+            notifiedSubZonesUI.forEach((sub) => {
+              const sx = (sub.cx / 100) * W;
+              const sy = (sub.cy / 100) * H;
+              const radius = 28;
+
+              ctx.save();
+              if (roiPolygon && roiPolygon.length >= 3) {
+                ctx.beginPath();
+                roiPolygon.forEach((pt, idx) => {
+                  const px = (pt.x / 100) * W;
+                  const py = (pt.y / 100) * H;
+                  if (idx === 0) ctx.moveTo(px, py);
+                  else ctx.lineTo(px, py);
+                });
+                ctx.closePath();
+                ctx.clip();
+              }
+
+              ctx.strokeStyle = "rgba(16, 185, 129, 0.85)";
+              ctx.lineWidth = 2;
+              ctx.setLineDash([5, 4]);
+              ctx.lineDashOffset = -t * 8;
+              ctx.beginPath();
+              ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+              ctx.stroke();
+
+              ctx.fillStyle = "rgba(16, 185, 129, 0.14)";
+              ctx.fill();
+
+              // Center dot
+              ctx.fillStyle = "#10b981";
+              ctx.beginPath();
+              ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+
+              // Badge showing this section was already notified & is being skipped until high-motion departure/join
+              ctx.save();
+              const tagText = `✓ SEC [${sub.col + 1},${sub.row + 1}] NOTIFIED`;
+              const tagW = 132;
+              const tagH = 18;
+              const tagX = Math.max(4, Math.min(W - tagW - 4, sx - tagW / 2));
+              const tagY = Math.max(4, sy - radius - 20);
+
+              ctx.fillStyle = "rgba(6, 78, 59, 0.92)";
+              ctx.fillRect(tagX, tagY, tagW, tagH);
+              ctx.strokeStyle = "rgba(52, 211, 153, 0.6)";
+              ctx.setLineDash([]);
+              ctx.lineWidth = 1;
+              ctx.strokeRect(tagX, tagY, tagW, tagH);
+
+              ctx.fillStyle = "#a7f3d0";
+              ctx.font = "bold 9px monospace";
+              ctx.fillText(tagText, tagX + 6, tagY + 12);
+              ctx.restore();
+            });
+          }
         }
       }
       animId = requestAnimationFrame(renderOverlay);
@@ -1199,12 +1542,28 @@ export default function LiveCctvOperatorPage() {
 
     animId = requestAnimationFrame(renderOverlay);
     return () => cancelAnimationFrame(animId);
-  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent, isHandPoseGatingActive]);
+  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent, isHandPoseGatingActive, notifiedSubZonesUI]);
 
 
 
   // Trigger Motion Event (Called automatically by in-browser detector or manually)
-  const handleTriggerMotionEvent = async (customScore?: number) => {
+  const handleTriggerMotionEvent = async (
+    customScore?: number,
+    isAutoTrigger: boolean = false,
+    triggerSection?: {
+      cellKey: string;
+      col: number;
+      row: number;
+      cx: number;
+      cy: number;
+      score: number;
+      isMajorSectionChange: boolean;
+      previousSummary?: string;
+    }
+  ) => {
+    if (isAutoTrigger && isTriggerInFlightRef.current) return;
+    isTriggerInFlightRef.current = true;
+
     const fullFrame = captureCurrentFrameBase64();
     const cropFrame = captureRoiCropBase64(roiZone);
     const sec = videoRef.current ? Math.floor(videoRef.current.currentTime) : 18;
@@ -1225,11 +1584,24 @@ export default function LiveCctvOperatorPage() {
       if (a2) temporalSequence.push(a2);
     }, 1400);
 
-    // Client-Side WebAssembly Text Detection on optical crop if enabled
+    // Client-Side WebAssembly Text Detection on optical crop ONLY if enabled
     let detectedOcrText: string | null = null;
     if (isTextDetectionActive && cropFrame) {
       detectedOcrText = await extractTextFromCrop(cropFrame);
     }
+
+    const prevNotified = lastNotifiedSummaryRef.current[currentCam.id];
+    const previousEventSummary =
+      triggerSection?.previousSummary ||
+      (isAutoTrigger && prevNotified && prevNotified.rule.toLowerCase() === targetConcept.toLowerCase()
+        ? prevNotified.summary
+        : null);
+
+    const sectionChangeHint = triggerSection
+      ? triggerSection.isMajorSectionChange
+        ? `High-motion change (Δ ${triggerSection.score}) detected in previously notified Sub-Section [${triggerSection.col + 1}, ${triggerSection.row + 1}] (center X:${triggerSection.cx}%, Y:${triggerSection.cy}%). Check if the seated/monitored person is leaving the table/area or if another person is joining.`
+        : `New motion activity detected in un-notified Sub-Section [${triggerSection.col + 1}, ${triggerSection.row + 1}] (center X:${triggerSection.cx}%, Y:${triggerSection.cy}%).`
+      : null;
 
     try {
       const res = await fetch("/api/cctv/trigger-event", {
@@ -1249,15 +1621,60 @@ export default function LiveCctvOperatorPage() {
           detectedOcrText,
           isTextDetectionEnabled: isTextDetectionActive,
           isHandPoseGatingEnabled: isHandPoseGatingActive,
+          isAutoTrigger,
+          previousEventSummary,
+          sectionChangeHint,
+          whatsAppEnabled,
           whatsAppRecipient,
+          whatsAppAccessToken: whatsAppAccessToken || undefined,
           whatsAppMode,
         }),
       });
 
       const data = await res.json();
+      if (data.skippedDuplicateOrUnverified) {
+        // If this was a high-motion spike in a previously notified section and the rule is no longer true (person left), unlock that section
+        if (triggerSection?.isMajorSectionChange && data.verified === false) {
+          const camSecs = notifiedSectionsRef.current[currentCam.id];
+          if (camSecs && camSecs[triggerSection.cellKey]) {
+            delete camSecs[triggerSection.cellKey];
+            setNotifiedSubZonesUI(Object.values(camSecs));
+          }
+        }
+        return;
+      }
       if (data.success && data.event) {
         const evt: MotionEventRecord = data.event;
-        if (evt.detectedText) {
+        const nowTs = Date.now();
+        lastNotifiedSummaryRef.current[currentCam.id] = {
+          rule: targetConcept,
+          summary: evt.reasoningText,
+          time: nowTs,
+        };
+
+        // Mark this spatial sub-section as Notified so normal sitting movements in this section are skipped
+        const secCol = triggerSection ? triggerSection.col : roiZone ? Math.min(5, Math.floor(((roiZone[0] + roiZone[2]) / 200) * 6)) : 2;
+        const secRow = triggerSection ? triggerSection.row : roiZone ? Math.min(3, Math.floor(((roiZone[1] + roiZone[3]) / 200) * 4)) : 1;
+        const secKey = `${secCol}_${secRow}`;
+        const secCx = triggerSection ? triggerSection.cx : Math.round(((secCol + 0.5) / 6) * 100);
+        const secCy = triggerSection ? triggerSection.cy : Math.round(((secRow + 0.5) / 4) * 100);
+
+        if (!notifiedSectionsRef.current[currentCam.id]) {
+          notifiedSectionsRef.current[currentCam.id] = {};
+        }
+        notifiedSectionsRef.current[currentCam.id][secKey] = {
+          cellKey: secKey,
+          col: secCol,
+          row: secRow,
+          cx: secCx,
+          cy: secCy,
+          rule: targetConcept,
+          summary: evt.reasoningText,
+          notifiedAt: nowTs,
+          quietTicks: 0,
+        };
+        setNotifiedSubZonesUI(Object.values(notifiedSectionsRef.current[currentCam.id]));
+        if (isTextDetectionActive && evt.detectedText) {
           setZoneOcrText(evt.detectedText);
         }
         setRecordedEvents((prev) => [evt, ...prev.filter((e) => e.id !== evt.id)]);
@@ -1271,6 +1688,8 @@ export default function LiveCctvOperatorPage() {
       }
     } catch (err) {
       console.error("Trigger error:", err);
+    } finally {
+      isTriggerInFlightRef.current = false;
     }
   };
 
@@ -1433,6 +1852,10 @@ export default function LiveCctvOperatorPage() {
       }
       setLiveDrawingPath([]);
       setIsDrawingZone(false);
+      delete lastNotifiedSummaryRef.current[selectedCamId];
+      delete notifiedSectionsRef.current[selectedCamId];
+      setNotifiedSubZonesUI([]);
+      lastTriggerRef.current = 0;
     } else if (drawTool === "circle") {
       if (dragStartRef.current && dragCurrent) {
         const cx = dragStartRef.current.x;
@@ -1461,6 +1884,10 @@ export default function LiveCctvOperatorPage() {
       dragStartRef.current = null;
       setDragCurrent(null);
       setIsDrawingZone(false);
+      delete lastNotifiedSummaryRef.current[selectedCamId];
+      delete notifiedSectionsRef.current[selectedCamId];
+      setNotifiedSubZonesUI([]);
+      lastTriggerRef.current = 0;
     } else {
       if (dragStartRef.current && dragCurrent) {
         const x1 = Math.round(Math.min(dragStartRef.current.x, dragCurrent.x));
@@ -1482,6 +1909,10 @@ export default function LiveCctvOperatorPage() {
       dragStartRef.current = null;
       setDragCurrent(null);
       setIsDrawingZone(false);
+      delete lastNotifiedSummaryRef.current[selectedCamId];
+      delete notifiedSectionsRef.current[selectedCamId];
+      setNotifiedSubZonesUI([]);
+      lastTriggerRef.current = 0;
     }
   };
 
@@ -1638,13 +2069,20 @@ export default function LiveCctvOperatorPage() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition ${
                   showWhatsAppSettings
                     ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20"
-                    : "bg-emerald-500/15 border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/25"
+                    : whatsAppEnabled
+                    ? "bg-emerald-500/15 border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/25"
+                    : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300"
                 }`}
                 title="WhatsApp Alert Settings"
               >
-                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <MessageSquare className={`w-3.5 h-3.5 ${whatsAppEnabled ? "text-emerald-400" : "text-slate-500"}`} />
                 <span>
-                  WhatsApp: {whatsAppRecipient && !whatsAppRecipient.includes("@") ? `+${whatsAppRecipient.replace(/^\+/, "")}` : "+1 (555) 019-2834 (Demo)"}
+                  WhatsApp:{" "}
+                  {!whatsAppEnabled
+                    ? "OFF"
+                    : whatsAppRecipient && !whatsAppRecipient.includes("@")
+                    ? `+${whatsAppRecipient.replace(/^\+/, "")}`
+                    : "ON"}
                 </span>
               </button>
 
@@ -1664,6 +2102,32 @@ export default function LiveCctvOperatorPage() {
                     </button>
                   </div>
 
+                  {/* ON / OFF Toggle Switch for WhatsApp Messaging */}
+                  <div className="flex items-center justify-between bg-slate-900/80 border border-slate-800 px-3 py-2 rounded-xl">
+                    <div>
+                      <span className="font-bold text-white text-[11px] block">
+                        WhatsApp Alerts
+                      </span>
+                      <span className="text-[9px] text-slate-400">
+                        {whatsAppEnabled ? "Sending verified alerts to WhatsApp" : "WhatsApp messaging paused"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const nextState = !whatsAppEnabled;
+                        setWhatsAppEnabled(nextState);
+                        persistWhatsAppSettings({ enabled: nextState });
+                      }}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-mono font-bold border transition ${
+                        whatsAppEnabled
+                          ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-sm shadow-emerald-500/20"
+                          : "bg-slate-800 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      {whatsAppEnabled ? "ON" : "OFF"}
+                    </button>
+                  </div>
+
                   <div>
                     <label className="text-[10px] text-slate-400 block mb-1">
                       Recipient Phone Number:
@@ -1671,12 +2135,16 @@ export default function LiveCctvOperatorPage() {
                     <input
                       type="text"
                       value={whatsAppRecipient}
-                      onChange={(e) => setWhatsAppRecipient(e.target.value.replace(/[^0-9+]/g, ""))}
-                      placeholder="e.g. 917999475243 (numbers only)"
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9+]/g, "");
+                        setWhatsAppRecipient(val);
+                        persistWhatsAppSettings({ recipient: val });
+                      }}
+                      placeholder="e.g. 15550192834 (numbers only)"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
                     />
                     <p className="text-[9px] text-slate-500 mt-0.5 italic">
-                      * Enter mobile phone with country code (numbers only, e.g. 917999475243).
+                      * Auto-saved. Include country code (numbers only).
                     </p>
                   </div>
 
@@ -1687,12 +2155,16 @@ export default function LiveCctvOperatorPage() {
                     <input
                       type="password"
                       value={whatsAppAccessToken}
-                      onChange={(e) => setWhatsAppAccessToken(e.target.value.trim())}
-                      placeholder="Paste token (already saved in .env.local)..."
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        setWhatsAppAccessToken(val);
+                        persistWhatsAppSettings({ token: val });
+                      }}
+                      placeholder="Paste token (auto-saved)..."
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono"
                     />
                     <p className="text-[9px] text-slate-500 mt-0.5 italic">
-                      * Permanent system user token is active in .env.local.
+                      * Auto-saved for every session &amp; stored in .env.local.
                     </p>
                   </div>
 
@@ -1704,7 +2176,10 @@ export default function LiveCctvOperatorPage() {
                           type="radio"
                           name="waMode"
                           checked={whatsAppMode === "full_reasoning"}
-                          onChange={() => setWhatsAppMode("full_reasoning")}
+                          onChange={() => {
+                            setWhatsAppMode("full_reasoning");
+                            persistWhatsAppSettings({ mode: "full_reasoning" });
+                          }}
                           className="accent-emerald-400"
                         />
                         <span>🖼️ Image + AI Reasoning & Why Triggered</span>
@@ -1714,7 +2189,10 @@ export default function LiveCctvOperatorPage() {
                           type="radio"
                           name="waMode"
                           checked={whatsAppMode === "summary_only"}
-                          onChange={() => setWhatsAppMode("summary_only")}
+                          onChange={() => {
+                            setWhatsAppMode("summary_only");
+                            persistWhatsAppSettings({ mode: "summary_only" });
+                          }}
                           className="accent-emerald-400"
                         />
                         <span>📝 Image + Short Summary</span>
@@ -1724,7 +2202,10 @@ export default function LiveCctvOperatorPage() {
                           type="radio"
                           name="waMode"
                           checked={whatsAppMode === "image_only"}
-                          onChange={() => setWhatsAppMode("image_only")}
+                          onChange={() => {
+                            setWhatsAppMode("image_only");
+                            persistWhatsAppSettings({ mode: "image_only" });
+                          }}
                           className="accent-emerald-400"
                         />
                         <span>📸 Image Only</span>
@@ -1736,7 +2217,17 @@ export default function LiveCctvOperatorPage() {
                     💬 <strong>Important:</strong> In WhatsApp, send a quick <em>&quot;Hi&quot;</em> to <strong>+1 (555) 147-4704</strong> to activate Meta&apos;s 24h custom alert window.
                   </div>
 
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => {
+                        persistWhatsAppSettings({});
+                        setWhatsAppTestStatus("✅ Settings saved!");
+                        setTimeout(() => setWhatsAppTestStatus(null), 3000);
+                      }}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-bold text-xs rounded-xl transition"
+                    >
+                      Save
+                    </button>
                     <button
                       onClick={handleTestWhatsAppDispatch}
                       disabled={isSendingWhatsAppTest}
@@ -1745,7 +2236,7 @@ export default function LiveCctvOperatorPage() {
                       {isSendingWhatsAppTest ? "Sending..." : "Send Test Alert"}
                     </button>
                     {whatsAppTestStatus && (
-                      <span className="text-[10px] text-emerald-300 truncate max-w-[150px]">
+                      <span className="text-[10px] text-emerald-300 truncate max-w-[120px]">
                         {whatsAppTestStatus}
                       </span>
                     )}
@@ -2071,9 +2562,8 @@ export default function LiveCctvOperatorPage() {
                 </span>
                 {targetPresets.map((preset) => {
                   const isSelected = targetConcept
-                    .toLowerCase()
-                    .split(/\s*,\s*OR\s*|\s*OR\s*/i)
-                    .some((part) => part.trim().toLowerCase() === preset.toLowerCase());
+                    .split(/,\s*OR\s+/)
+                    .some((part) => part.trim().toLowerCase() === preset.trim().toLowerCase());
 
                   return (
                     <div
@@ -2773,9 +3263,17 @@ export default function LiveCctvOperatorPage() {
                     onClick={() => {
                       if (eventViewFilter === "current") {
                         setRecordedEvents((prev) => prev.filter((e) => e.cameraId !== selectedCamId));
+                        delete lastNotifiedSummaryRef.current[selectedCamId];
+                        delete notifiedSectionsRef.current[selectedCamId];
+                        setNotifiedSubZonesUI([]);
+                        lastTriggerRef.current = 0;
                         fetch(`/api/cctv/events?cameraId=${encodeURIComponent(selectedCamId)}`, { method: "DELETE" }).catch(() => {});
                       } else {
                         setRecordedEvents([]);
+                        lastNotifiedSummaryRef.current = {};
+                        notifiedSectionsRef.current = {};
+                        setNotifiedSubZonesUI([]);
+                        lastTriggerRef.current = 0;
                         fetch("/api/cctv/events", { method: "DELETE" }).catch(() => {});
                       }
                     }}
@@ -2839,10 +3337,10 @@ export default function LiveCctvOperatorPage() {
                         </p>
 
                         {/* Optimization 3: Structured Forensic Tags (Vehicle, License Plate, Person, Risk) */}
-                        {evt.vehicleDetails && (
+                        {evt.vehicleDetails?.type && (
                           <div className="flex items-center gap-1.5 flex-wrap my-1.5 text-[10px] font-mono">
                             <span className="px-2 py-0.5 rounded bg-sky-500/15 border border-sky-400/30 text-sky-300 font-semibold">
-                              🚗 {evt.vehicleDetails.color || ""} {evt.vehicleDetails.type || "Vehicle"}
+                              🚗 {evt.vehicleDetails.color || ""} {evt.vehicleDetails.type}
                               {evt.vehicleDetails.makeModel ? ` (${evt.vehicleDetails.makeModel})` : ""}
                             </span>
                             {evt.vehicleDetails.licensePlate ? (
@@ -2862,7 +3360,7 @@ export default function LiveCctvOperatorPage() {
                           </div>
                         )}
 
-                        {evt.personDetails && (
+                        {evt.personDetails && (evt.personDetails.clothing || evt.personDetails.action) && (
                           <div className="flex items-center gap-1.5 flex-wrap my-1 text-[10px] font-mono">
                             <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
                               👤 {evt.personDetails.clothing || "Person"} {evt.personDetails.action ? `• ${evt.personDetails.action}` : ""}
@@ -2870,7 +3368,7 @@ export default function LiveCctvOperatorPage() {
                           </div>
                         )}
 
-                        {evt.transactionDetails && (
+                        {evt.transactionDetails?.cashDetected && (
                           <div className="flex items-center gap-1.5 flex-wrap my-1 text-[10px] font-mono">
                             <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-bold flex items-center gap-1">
                               <span>💵</span>
@@ -2889,7 +3387,7 @@ export default function LiveCctvOperatorPage() {
                           </div>
                         )}
 
-                        {evt.detectedText && (
+                        {evt.detectedText && evt.isTextDetectionEnabled && (
                           <div className="flex items-center gap-1.5 flex-wrap my-1 text-[10px] font-mono">
                             <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold flex items-center gap-1">
                               <span>🔤 Text Detected:</span>

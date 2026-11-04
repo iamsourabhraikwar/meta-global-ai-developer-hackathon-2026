@@ -50,6 +50,9 @@ export async function POST(req: NextRequest) {
       targetConcept,
       detectedOcrText,
       isTextDetectionEnabled,
+      isAutoTrigger,
+      previousEventSummary,
+      sectionChangeHint,
     } = body;
 
     const existingCam = CAMERAS.find((c) => c.id === cameraId);
@@ -64,15 +67,37 @@ export async function POST(req: NextRequest) {
 
     // 1. Verification with Meta Muse Spark on Baseten ($100 credits)
     const museResult: MetaVerifyResult = candidateKeyframe
-      ? await verifyEventWithMuseSpark(candidateKeyframe, concept, cam.name, croppedKeyframe, detectedOcrText)
+      ? await verifyEventWithMuseSpark(candidateKeyframe, concept, cam.name, croppedKeyframe, detectedOcrText, {
+          isTextDetectionEnabled: Boolean(isTextDetectionEnabled),
+          previousEventSummary: previousEventSummary || null,
+          sectionChangeHint: sectionChangeHint || null,
+        })
       : {
           verified: true,
           description: `Motion trigger detected ${concept} on ${cam.name}`,
           alertLevel: "watch" as const,
           latencyMs: 15,
           modelUsed: "Edge Fast Trigger",
-          detectedText: detectedOcrText || null,
+          detectedText: isTextDetectionEnabled ? detectedOcrText || null : null,
         };
+
+    const confidencePercent = museResult.confidencePercent ?? (museResult.verified ? 85 : 0);
+    const isHighConfidenceVerified = Boolean(museResult.verified) && confidencePercent >= 75;
+
+    // Suppress duplicate, low-confidence (<75%), or unverified auto-triggers so standing passersby or same sitting scene do not trigger alerts
+    if (Boolean(isAutoTrigger) && (!isHighConfidenceVerified || museResult.isDuplicateOngoing)) {
+      return NextResponse.json({
+        success: true,
+        skippedDuplicateOrUnverified: true,
+        verified: isHighConfidenceVerified,
+        confidencePercent,
+        isDuplicateOngoing: Boolean(museResult.isDuplicateOngoing),
+        metrics: {
+          latencyMs: museResult.latencyMs,
+          modelUsed: museResult.modelUsed,
+        },
+      });
+    }
 
     const sec = Math.max(0, Math.round(Number(videoSecond) || 0));
     const now = new Date();
@@ -101,7 +126,7 @@ export async function POST(req: NextRequest) {
       personDetails: museResult.personDetails,
       transactionDetails: museResult.transactionDetails,
       riskScore: museResult.riskScore,
-      detectedText: museResult.detectedText || detectedOcrText || null,
+      detectedText: museResult.detectedText || (isTextDetectionEnabled ? detectedOcrText : null) || null,
       isTextDetectionEnabled: Boolean(isTextDetectionEnabled),
       hasSamMask: false, // Lazy SAM 3.1: Generated on-demand when inspected
     };
@@ -109,9 +134,10 @@ export async function POST(req: NextRequest) {
     // Save to persistent storage on disk
     persistEventRecord(eventRecord);
 
-    // Option 2 (Intelligent Guard): Send WhatsApp alert with Method B image upload when verified by Meta Muse Spark!
+    // Option 2 (Intelligent Guard): Send WhatsApp alert with Method B image upload ONLY when enabled & verified with >=75% confidence by Meta Muse Spark!
+    const isWhatsAppEnabled = body.whatsAppEnabled !== undefined ? Boolean(body.whatsAppEnabled) : true;
     let whatsAppResult: any = null;
-    if (eventRecord.verified) {
+    if (isHighConfidenceVerified && isWhatsAppEnabled) {
       let triggerReason = `Motion delta ${eventRecord.motionScore.toFixed(1)} crossed threshold in watch zone and was verified matching rule "${concept}".`;
       if (eventRecord.detectedText) {
         triggerReason += `\n🔤 Detected Text / Number Plate: [${eventRecord.detectedText}]`;
@@ -127,6 +153,7 @@ export async function POST(req: NextRequest) {
         timeShort,
         imageBase64: candidateKeyframe,
         recipientPhone: body.whatsAppRecipient || process.env.WHATSAPP_RECIPIENT_PHONE || "",
+        accessToken: body.whatsAppAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || "",
         mode: body.whatsAppMode || "full_reasoning",
       });
     }

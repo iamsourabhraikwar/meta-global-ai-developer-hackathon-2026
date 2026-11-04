@@ -11,7 +11,16 @@ export async function GET() {
     if (fs.existsSync(CONFIG_PATH)) {
       const data = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
       if (data.whatsAppRecipient && data.whatsAppRecipient.includes("@")) {
-        data.whatsAppRecipient = "15550192834";
+        data.whatsAppRecipient = process.env.WHATSAPP_RECIPIENT_PHONE || "15550192834";
+      }
+      if (!data.whatsAppAccessToken && process.env.WHATSAPP_ACCESS_TOKEN) {
+        data.whatsAppAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+      }
+      if (!data.whatsAppPhoneNumberId && process.env.WHATSAPP_PHONE_NUMBER_ID) {
+        data.whatsAppPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+      }
+      if (!data.whatsAppRecipient && process.env.WHATSAPP_RECIPIENT_PHONE) {
+        data.whatsAppRecipient = process.env.WHATSAPP_RECIPIENT_PHONE;
       }
       return NextResponse.json({ success: true, config: data });
     }
@@ -25,7 +34,8 @@ export async function GET() {
         modelId: process.env.BASETEN_MUSE_SPARK_MODEL || "meta-models/muse-spark-open-1026",
         whatsAppPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
         whatsAppAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
-        whatsAppRecipient: process.env.WHATSAPP_RECIPIENT_PHONE || "",
+        whatsAppRecipient: process.env.WHATSAPP_RECIPIENT_PHONE || "15550192834",
+        whatsAppEnabled: true,
         hasCompletedSetup: false,
       },
     });
@@ -48,7 +58,13 @@ export async function POST(req: NextRequest) {
 
     const sanitizedBody = { ...body };
     if (sanitizedBody.whatsAppRecipient && sanitizedBody.whatsAppRecipient.includes("@")) {
-      sanitizedBody.whatsAppRecipient = "15550192834";
+      sanitizedBody.whatsAppRecipient = currentConfig.whatsAppRecipient || process.env.WHATSAPP_RECIPIENT_PHONE || "15550192834";
+    }
+    if (!sanitizedBody.whatsAppAccessToken && currentConfig.whatsAppAccessToken) {
+      sanitizedBody.whatsAppAccessToken = currentConfig.whatsAppAccessToken;
+    }
+    if (!sanitizedBody.whatsAppPhoneNumberId && currentConfig.whatsAppPhoneNumberId) {
+      sanitizedBody.whatsAppPhoneNumberId = currentConfig.whatsAppPhoneNumberId;
     }
 
     const updatedConfig = {

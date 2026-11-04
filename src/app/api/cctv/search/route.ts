@@ -56,9 +56,7 @@ def filter_events(events):
     return results`;
 
     // 2. Call Meta Muse Spark to write the operator incident response
-    const apiKey =
-      process.env.BASETEN_API_KEY ||
-      "b10_Fire5ysg.JXwLkiWn4upJSy4Ju3WEIgzr9YShwYKn";
+    const apiKey = process.env.BASETEN_API_KEY || "";
     const baseUrl = (
       process.env.BASETEN_BASE_URL || "https://inference.baseten.co/v1"
     ).replace(/\/+$/, "");
