@@ -21,7 +21,7 @@ export const CAMERAS: CameraConfig[] = [
     shortName: "Retail Cash Counter",
     name: "Retail POS & Cash Register Counter",
     location: "Commercial Sector • Retail POS Counter",
-    videoUrl: "/api/cctv/stream?cam=cam-02",
+    videoUrl: "/api/cctv/stream?cam=cam-02&v=cashier",
     resolution: "3840x2160 (4K)",
     fps: 30,
     status: "ONLINE",

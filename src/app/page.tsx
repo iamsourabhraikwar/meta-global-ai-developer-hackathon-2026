@@ -107,13 +107,15 @@ export default function LiveCctvOperatorPage() {
   const isTriggerInFlightRef = useRef<boolean>(false);
   const quietFramesCountRef = useRef<number>(0);
   const lastNotifiedSummaryRef = useRef<Record<string, { rule: string; summary: string; time: number }>>({});
-  // Spatial Sub-Section (6x4 Micro-Grid) State Gating: remembers which section of Full Frame / Custom Pencil already notified
+  // Spatial Sub-Section (6x4 Micro-Grid) State Gating: remembers which section of Full Frame / Custom Pencil already notified per camera
+  const [isSectionGatingActive, setIsSectionGatingActive] = useState<boolean>(false);
   const notifiedSectionsRef = useRef<
     Record<
       string,
       Record<
         string,
         {
+          camId: string;
           cellKey: string;
           col: number;
           row: number;
@@ -129,6 +131,7 @@ export default function LiveCctvOperatorPage() {
   >({});
   const [notifiedSubZonesUI, setNotifiedSubZonesUI] = useState<
     Array<{
+      camId: string;
       cellKey: string;
       col: number;
       row: number;
@@ -139,17 +142,17 @@ export default function LiveCctvOperatorPage() {
     }>
   >([]);
 
-  // Capture current frame from HTML5 video element as Base64 JPEG
+  // Capture current frame from HTML5 video element as Base64 JPEG (HD 1280x720 for sharp license plate & text reading)
   const captureCurrentFrameBase64 = (): string | null => {
     if (!videoRef.current || videoRef.current.readyState < 2) return null;
     try {
       const off = document.createElement("canvas");
-      off.width = 640;
-      off.height = 360;
+      off.width = 1280;
+      off.height = 720;
       const ctx = off.getContext("2d");
       if (!ctx) return null;
-      ctx.drawImage(videoRef.current, 0, 0, 640, 360);
-      return off.toDataURL("image/jpeg", 0.75).split(",")[1];
+      ctx.drawImage(videoRef.current, 0, 0, 1280, 720);
+      return off.toDataURL("image/jpeg", 0.86).split(",")[1];
     } catch (e) {
       console.warn("Frame capture error:", e);
       return null;
@@ -196,13 +199,13 @@ export default function LiveCctvOperatorPage() {
       } else {
         ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
       }
-      return off.toDataURL("image/jpeg", 0.75).split(",")[1];
+      return off.toDataURL("image/jpeg", 0.9).split(",")[1];
     } catch (e) {
       return null;
     }
   };
 
-  // Optimization 2: Rolling Multi-Frame Temporal Buffer (5 before + 1 trigger + 5 after = 11 frames)
+  // Optimization 2: Rolling Multi-Frame Temporal Buffer (10 frames before [10s @ 1fps] + 1 trigger + post frames)
   const rollingFramesRef = useRef<{ second: number; b64: string }[]>([]);
 
   // Optimization 4: Load Persistent Event History from database on mount
@@ -217,7 +220,7 @@ export default function LiveCctvOperatorPage() {
       .catch((err) => console.log("Database load err:", err));
   }, []);
 
-  // Periodic sampler for temporal multi-frame sequence
+  // Periodic sampler for temporal multi-frame sequence (1 frame per second, retaining 10s pre-roll history)
   useEffect(() => {
     const timer = setInterval(() => {
       const v = videoRef.current;
@@ -232,7 +235,7 @@ export default function LiveCctvOperatorPage() {
           rollingFramesRef.current.shift();
         }
       }
-    }, 800);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -315,8 +318,13 @@ export default function LiveCctvOperatorPage() {
         ])) as any;
 
         const rawText = res?.data?.text?.trim() || "";
-        const cleanedText = rawText.replace(/[^A-Za-z0-9 -]/g, " ").replace(/\s+/g, " ").trim();
-        if (cleanedText.length >= 2) {
+        // Filter out random 1-2 character OCR noise tokens from textures/edges; keep only real words (>=3 uppercase letters) or number/plate tokens
+        const validTokens = rawText
+          .replace(/[^A-Za-z0-9 -]/g, " ")
+          .split(/\s+/)
+          .filter((tok: string) => /^[A-Z]{3,}$/.test(tok) || (/^[A-Z0-9-]{2,10}$/.test(tok) && /\d/.test(tok) && tok.length >= 2));
+        const cleanedText = validTokens.join(" ").trim();
+        if (cleanedText.length >= 3) {
           setZoneOcrText(cleanedText);
           setIsScanningOcr(false);
           return cleanedText;
@@ -710,6 +718,7 @@ export default function LiveCctvOperatorPage() {
     setShowCamFeedConfig(false);
     setShowCustomFeedInput(false);
     prevFrameData.current = null;
+    rollingFramesRef.current = [];
     setCurrentMotionScore(0.0);
     // Reset playhead for clean transition
     if (videoRef.current) {
@@ -722,6 +731,14 @@ export default function LiveCctvOperatorPage() {
     setActiveEvent(null);
     setRuleExplanation(null);
     setRoiPolygon(null);
+
+    // Sync notified sub-sections strictly for the newly selected camera (never leak across cameras)
+    setNotifiedSubZonesUI(Object.values(notifiedSectionsRef.current[camId] || {}));
+
+    // Section Notified Gating enabled by default for Restaurant (CAM-03) or sitting/table/chair rules
+    const isRestaurantOrTableRule =
+      camId === "cam-03" || /\b(sitting|sit|seated|table|chair|restaurant|dining)\b/i.test(existingRule);
+    setIsSectionGatingActive(isRestaurantOrTableRule);
 
     // MediaPipe Hand & Pose Landmark Gating enabled by default for Cash Register (CAM-02), Home Outside (CAM-09), and Jewelry Counter (CAM-10)
     setIsHandPoseGatingActive(camId === "cam-02" || camId === "cam-09" || camId === "cam-10");
@@ -789,6 +806,11 @@ export default function LiveCctvOperatorPage() {
     delete lastNotifiedSummaryRef.current[selectedCamId];
     delete notifiedSectionsRef.current[selectedCamId];
     setNotifiedSubZonesUI([]);
+
+    // Auto-enable Section Notified Gating when selecting a sitting/table/chair/restaurant rule
+    if (/\b(sitting|sit|seated|table|chair|restaurant|dining)\b/i.test(ruleToSave)) {
+      setIsSectionGatingActive(true);
+    }
 
     // Auto-add customized single rule into targetPresets if not already present (never add combined ", OR " strings)
     if (!isFromToggle && !/,\s*OR\s+/.test(ruleToSave)) {
@@ -1226,13 +1248,24 @@ export default function LiveCctvOperatorPage() {
             setNotifiedSubZonesUI(Object.values(camSections));
           }
 
-          if (
-            bestTriggerSection &&
-            !isTriggerInFlightRef.current &&
-            now - lastTriggerRef.current > 7500
-          ) {
-            lastTriggerRef.current = now;
-            handleTriggerMotionEvent(bestTriggerSection.score, true, bestTriggerSection);
+          if (isSectionGatingActive) {
+            if (
+              bestTriggerSection &&
+              !isTriggerInFlightRef.current &&
+              now - lastTriggerRef.current > 7500
+            ) {
+              lastTriggerRef.current = now;
+              handleTriggerMotionEvent(bestTriggerSection.score, true, bestTriggerSection);
+            }
+          } else {
+            if (
+              score >= motionThreshold &&
+              !isTriggerInFlightRef.current &&
+              now - lastTriggerRef.current > 7500
+            ) {
+              lastTriggerRef.current = now;
+              handleTriggerMotionEvent(score, true);
+            }
           }
         }
 
@@ -1243,7 +1276,7 @@ export default function LiveCctvOperatorPage() {
     }, 350);
 
     return () => clearInterval(timer);
-  }, [autoTriggerEnabled, roiZone, roiPolygon, motionThreshold, selectedCamId, currentCam.isLiveStream]);
+  }, [autoTriggerEnabled, roiZone, roiPolygon, motionThreshold, selectedCamId, currentCam.isLiveStream, isSectionGatingActive, targetConcept]);
 
   // Draw HUD, Active ROI Zone Box, and SAM 3.1 Mask on Video Canvas
   useEffect(() => {
@@ -1476,9 +1509,12 @@ export default function LiveCctvOperatorPage() {
             ctx.restore();
           }
 
-          // 5. Draw Notified Spatial Sub-Sections (Strictly clipped inside Custom Pencil polygon so circles never appear outside)
-          if (notifiedSubZonesUI.length > 0 && !isDrawingZone) {
-            notifiedSubZonesUI.forEach((sub) => {
+          // 5. Draw Notified Spatial Sub-Sections (Strictly for current camera & only when Section Notified gating is ON)
+          const currentCamSubZones = isSectionGatingActive
+            ? notifiedSubZonesUI.filter((s) => s.camId === selectedCamId)
+            : [];
+          if (currentCamSubZones.length > 0 && !isDrawingZone) {
+            currentCamSubZones.forEach((sub) => {
               const sx = (sub.cx / 100) * W;
               const sy = (sub.cy / 100) * H;
               const radius = 28;
@@ -1542,7 +1578,7 @@ export default function LiveCctvOperatorPage() {
 
     animId = requestAnimationFrame(renderOverlay);
     return () => cancelAnimationFrame(animId);
-  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent, isHandPoseGatingActive, notifiedSubZonesUI]);
+  }, [activeSamMask, roiZone, roiPolygon, roiZoneLabel, isDrawingZone, drawTool, liveDrawingPath, dragCurrent, isHandPoseGatingActive, isSectionGatingActive, selectedCamId, notifiedSubZonesUI]);
 
 
 
@@ -1569,20 +1605,18 @@ export default function LiveCctvOperatorPage() {
     const sec = videoRef.current ? Math.floor(videoRef.current.currentTime) : 18;
     const score = customScore ?? 16.8;
 
-    // Optimization 2: Build 11-frame temporal sequence (5 before + 1 trigger + 5 after)
-    const beforeFrames = rollingFramesRef.current.slice(-5).map((f) => f.b64);
+    // Optimization 2: Build temporal sequence with up to 10 pre-trigger frames (10s before @ 1fps) + trigger frame + post-trigger frames
+    const beforeFrames = rollingFramesRef.current.slice(-10).map((f) => f.b64);
     const temporalSequence = [...beforeFrames];
     if (fullFrame) temporalSequence.push(fullFrame);
 
-    // Opportunistically schedule subsequent frames
-    setTimeout(() => {
-      const a1 = captureCurrentFrameBase64();
-      if (a1) temporalSequence.push(a1);
-    }, 700);
-    setTimeout(() => {
-      const a2 = captureCurrentFrameBase64();
-      if (a2) temporalSequence.push(a2);
-    }, 1400);
+    // Capture post-trigger frames so Meta Muse Spark can inspect the vehicle/scene across before, during, and after frames
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const afterFrame1 = captureCurrentFrameBase64();
+    if (afterFrame1) temporalSequence.push(afterFrame1);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const afterFrame2 = captureCurrentFrameBase64();
+    if (afterFrame2) temporalSequence.push(afterFrame2);
 
     // Client-Side WebAssembly Text Detection on optical crop ONLY if enabled
     let detectedOcrText: string | null = null;
@@ -1652,28 +1686,33 @@ export default function LiveCctvOperatorPage() {
           time: nowTs,
         };
 
-        // Mark this spatial sub-section as Notified so normal sitting movements in this section are skipped
-        const secCol = triggerSection ? triggerSection.col : roiZone ? Math.min(5, Math.floor(((roiZone[0] + roiZone[2]) / 200) * 6)) : 2;
-        const secRow = triggerSection ? triggerSection.row : roiZone ? Math.min(3, Math.floor(((roiZone[1] + roiZone[3]) / 200) * 4)) : 1;
-        const secKey = `${secCol}_${secRow}`;
-        const secCx = triggerSection ? triggerSection.cx : Math.round(((secCol + 0.5) / 6) * 100);
-        const secCy = triggerSection ? triggerSection.cy : Math.round(((secRow + 0.5) / 4) * 100);
+        if (isSectionGatingActive) {
+          // Mark this spatial sub-section as Notified for this specific camera only
+          const secCol = triggerSection ? triggerSection.col : roiZone ? Math.min(5, Math.floor(((roiZone[0] + roiZone[2]) / 200) * 6)) : 2;
+          const secRow = triggerSection ? triggerSection.row : roiZone ? Math.min(3, Math.floor(((roiZone[1] + roiZone[3]) / 200) * 4)) : 1;
+          const secKey = `${secCol}_${secRow}`;
+          const secCx = triggerSection ? triggerSection.cx : Math.round(((secCol + 0.5) / 6) * 100);
+          const secCy = triggerSection ? triggerSection.cy : Math.round(((secRow + 0.5) / 4) * 100);
 
-        if (!notifiedSectionsRef.current[currentCam.id]) {
-          notifiedSectionsRef.current[currentCam.id] = {};
+          if (!notifiedSectionsRef.current[currentCam.id]) {
+            notifiedSectionsRef.current[currentCam.id] = {};
+          }
+          notifiedSectionsRef.current[currentCam.id][secKey] = {
+            camId: currentCam.id,
+            cellKey: secKey,
+            col: secCol,
+            row: secRow,
+            cx: secCx,
+            cy: secCy,
+            rule: targetConcept,
+            summary: evt.reasoningText,
+            notifiedAt: nowTs,
+            quietTicks: 0,
+          };
+          if (currentCam.id === selectedCamId) {
+            setNotifiedSubZonesUI(Object.values(notifiedSectionsRef.current[currentCam.id]));
+          }
         }
-        notifiedSectionsRef.current[currentCam.id][secKey] = {
-          cellKey: secKey,
-          col: secCol,
-          row: secRow,
-          cx: secCx,
-          cy: secCy,
-          rule: targetConcept,
-          summary: evt.reasoningText,
-          notifiedAt: nowTs,
-          quietTicks: 0,
-        };
-        setNotifiedSubZonesUI(Object.values(notifiedSectionsRef.current[currentCam.id]));
         if (isTextDetectionActive && evt.detectedText) {
           setZoneOcrText(evt.detectedText);
         }
@@ -2724,6 +2763,22 @@ export default function LiveCctvOperatorPage() {
                 >
                   <span className="font-mono text-xs">🖐️</span>
                   <span>Hand & Pose Gating: {isHandPoseGatingActive ? "ON" : "OFF"}</span>
+                </button>
+
+                {/* Spatial Section Notified Gating Toggle (Default ON for Restaurant / Sitting rules) */}
+                <button
+                  onClick={() => {
+                    setIsSectionGatingActive((prev) => !prev);
+                  }}
+                  className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg font-bold border transition ${
+                    isSectionGatingActive
+                      ? "bg-teal-400 text-slate-950 border-teal-300 shadow-md shadow-teal-400/25"
+                      : "bg-slate-950 border-slate-800 text-slate-400 hover:text-teal-300 hover:border-teal-500/40"
+                  }`}
+                  title="Enable Spatial Section Notified Lock (By default ON for Restaurant / Table rules; skips already-notified seated sections until someone leaves or joins)"
+                >
+                  <span className="font-mono text-xs">🪑</span>
+                  <span>Section Notified: {isSectionGatingActive ? "ON" : "OFF"}</span>
                 </button>
 
                 {/* Clear Active Shape */}

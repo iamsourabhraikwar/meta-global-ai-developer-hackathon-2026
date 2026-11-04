@@ -65,12 +65,13 @@ export async function POST(req: NextRequest) {
     };
     const concept = targetConcept || cam.defaultTarget || "moving vehicle or person";
 
-    // 1. Verification with Meta Muse Spark on Baseten ($100 credits)
+    // 1. Verification with Meta Muse Spark on Baseten ($100 credits) across multi-frame temporal sequence
     const museResult: MetaVerifyResult = candidateKeyframe
       ? await verifyEventWithMuseSpark(candidateKeyframe, concept, cam.name, croppedKeyframe, detectedOcrText, {
           isTextDetectionEnabled: Boolean(isTextDetectionEnabled),
           previousEventSummary: previousEventSummary || null,
           sectionChangeHint: sectionChangeHint || null,
+          temporalFrames: Array.isArray(temporalFrames) ? temporalFrames : [],
         })
       : {
           verified: true,
@@ -139,8 +140,21 @@ export async function POST(req: NextRequest) {
     let whatsAppResult: any = null;
     if (isHighConfidenceVerified && isWhatsAppEnabled) {
       let triggerReason = `Motion delta ${eventRecord.motionScore.toFixed(1)} crossed threshold in watch zone and was verified matching rule "${concept}".`;
+      if (eventRecord.vehicleDetails?.type) {
+        const vInfo = [
+          eventRecord.vehicleDetails.color,
+          eventRecord.vehicleDetails.type,
+          eventRecord.vehicleDetails.makeModel ? `(${eventRecord.vehicleDetails.makeModel})` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const plateInfo = eventRecord.vehicleDetails.licensePlate
+          ? ` | Plate: ${eventRecord.vehicleDetails.licensePlate}`
+          : " | Plate: Unmounted/Occluded in frame";
+        triggerReason += `\n🚗 Vehicle: ${vInfo}${plateInfo}`;
+      }
       if (eventRecord.detectedText) {
-        triggerReason += `\n🔤 Detected Text / Number Plate: [${eventRecord.detectedText}]`;
+        triggerReason += `\n🔤 Detected Text / Markings: [${eventRecord.detectedText}]`;
       }
       whatsAppResult = await sendWhatsAppImageAlert({
         cameraName: cam.name,

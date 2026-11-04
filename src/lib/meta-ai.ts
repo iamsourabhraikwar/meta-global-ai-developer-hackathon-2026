@@ -74,6 +74,7 @@ export async function verifyEventWithMuseSpark(
     isTextDetectionEnabled?: boolean;
     previousEventSummary?: string | null;
     sectionChangeHint?: string | null;
+    temporalFrames?: string[];
   }
 ): Promise<MetaVerifyResult> {
   const startTime = Date.now();
@@ -86,7 +87,7 @@ export async function verifyEventWithMuseSpark(
 
   const lowerRule = targetConcept.toLowerCase();
   const needsCash = /\b(cash|drawer|register|currency|money|bill|note|payment|checkout|pos)\b/i.test(lowerRule);
-  const needsVehicle = /\b(vehicle|car|truck|van|suv|bike|motorcycle|scooter|bus|lorry|forklift|plate|parking|ramp|driveway)\b/i.test(lowerRule);
+  const needsVehicle = /\b(vehicle|car|truck|van|suv|bike|motorcycle|scooter|bus|lorry|forklift|plate|parking|ramp|driveway|number)\b/i.test(lowerRule);
   const needsText = Boolean(options?.isTextDetectionEnabled) || /\b(text|plate|number|sign|label|ocr)\b/i.test(lowerRule);
   const needsPerson = !needsVehicle || /\b(person|persion|people|customer|man|woman|child|children|worker|sitting|table|chair|hand|intruder|thief|pirate|pedestrian|owner|waiting)\b/i.test(lowerRule);
   const isSittingOrTableRule = /\b(sitting|sit|seated|table|chair|leaving|joining)\b/i.test(lowerRule);
@@ -96,13 +97,14 @@ export async function verifyEventWithMuseSpark(
     `  "confidence_percent": 85`,
     `  "is_duplicate_ongoing": false`,
     `  "alert_level": "watch"`,
-    `  "summary": "1 concise sentence describing strictly whether the operator target rule is happening in this frame."`,
+    `  "summary": "1 concise sentence describing what is happening in the frame (include vehicle color/type, license plate number or printed vehicle text if visible, or state if the plate is occluded/unmounted)."`,
     `  "risk_score": 25`,
   ];
 
   const instructionLines: string[] = [
     `You are Meta Muse Spark, an expert real-time CCTV security operator.`,
-    `Keep reasoning under 35 words. Strictly inspect ONLY the visible unmasked Watch Zone for the operator's requested rule: "${targetConcept}".`,
+    `Keep internal reasoning brief (under 25 words) and ALWAYS output the final JSON object.`,
+    `Strictly inspect ONLY the visible unmasked Watch Zone and temporal sequence frames for the operator's requested rule: "${targetConcept}".`,
     `Blacked-out/masked regions are outside the operator's Custom Pencil Watch Zone—completely ignore anything outside the unmasked zone.`,
     `Do NOT invent or report unrelated categories (do not report vehicles, cash, or text unless explicitly requested below).`,
     `- Set "target_detected": true and "confidence_percent" >= 75 (0-100 scale) ONLY if you have 75% to 100% confirmation that "${targetConcept}" is genuinely happening inside the visible watch zone; otherwise set "target_detected": false and "confidence_percent": 0.`,
@@ -131,25 +133,29 @@ export async function verifyEventWithMuseSpark(
     schemaFields.push(`  "person": { "clothing": "shirt description", "carried_objects": "none", "action": "current action" }`);
   }
   if (needsVehicle) {
-    instructionLines.push(`- Extract "vehicle": { "type": string, "color": string, "make_model": string, "license_plate": string | null } ONLY if a vehicle matching the rule is present.`);
-    schemaFields.push(`  "vehicle": { "type": "truck", "color": "white", "make_model": "delivery van", "license_plate": null }`);
+    instructionLines.push(
+      `- Extract "vehicle": { "type": string, "color": string, "make_model": string, "license_plate": string | null }. Inspect ALL temporal pre-trigger and trigger frames carefully to read the license plate or fleet number before/after any person steps in front of the bumper. If no license plate is mounted or if it is occluded across all frames, set "license_plate": null and mention any visible body markings (e.g., "FOOD SUPPLIES") in "summary".`
+    );
+    schemaFields.push(`  "vehicle": { "type": "van", "color": "white", "make_model": "delivery van", "license_plate": "ABC-1234 or null" }`);
   }
   if (needsCash) {
     instructionLines.push(`- Extract "transaction": { "cash_detected": boolean, "currency_type": string | null, "estimated_denomination": string | null, "action_type": "cash_taken" | "cash_placed" | "inspecting_drawer" | null }.`);
     schemaFields.push(`  "transaction": { "cash_detected": true, "currency_type": "USD", "estimated_denomination": "$20 bills", "action_type": "cash_taken" }`);
   }
   if (needsText) {
-    instructionLines.push(`- Extract "detected_text": read visible license plate or sign text if legible, otherwise null.`);
-    schemaFields.push(`  "detected_text": null`);
+    instructionLines.push(
+      `- Extract "detected_text": carefully read all temporal frames (from 10s before trigger to after trigger) and transcribe the exact license plate number and/or clean printed vehicle/sign text (e.g. "PLATE: XYZ-123" or "FOOD SUPPLIES (Rear Plate Unmounted/Occluded)"). Never output random OCR noise characters.`
+    );
+    schemaFields.push(`  "detected_text": "exact license plate number or printed sign text"`);
   }
 
   const systemPrompt = `${instructionLines.join("\n")}\nOutput ONLY valid JSON:\n{\n${schemaFields.join(",\n")}\n}`;
 
   let userPrompt = `Operator Target Rule: "${targetConcept}" on ${cameraName}.
-Strictly verify ONLY this rule. Is "${targetConcept}" happening right now?`;
+Strictly verify ONLY this rule across the temporal sequence. Is "${targetConcept}" happening right now?`;
 
   if (needsText && detectedOcrText) {
-    userPrompt += `\nClient-Side WebAssembly OCR in Watch Zone detected text candidate: "${detectedOcrText}". Verify and transcribe any visible text.`;
+    userPrompt += `\nClient-Side OCR hint (may contain noise—verify visually from the frames and output only clean real text/numbers): "${detectedOcrText}".`;
   }
 
   const imageUrl = imageBase64.startsWith("data:")
@@ -158,14 +164,42 @@ Strictly verify ONLY this rule. Is "${targetConcept}" happening right now?`;
 
   const userContent: any[] = [{ type: "text", text: userPrompt }];
 
-  // When a Custom Pencil or ROI Watch Zone crop is provided, send ONLY the masked zone crop so the AI never inspects outside regions
+  // Attach multi-frame temporal sequence (from up to 10 seconds before trigger + after trigger) so the AI can read vehicle numbers even if occluded in the trigger frame
+  const seq = Array.isArray(options?.temporalFrames) ? options!.temporalFrames!.filter(Boolean) : [];
+  if (seq.length >= 2) {
+    const sampleIndices = Array.from(
+      new Set([
+        0,
+        Math.floor((seq.length - 1) * 0.4),
+        Math.max(0, seq.length - 2),
+      ])
+    ).slice(0, 3);
+
+    userContent.push({
+      type: "text",
+      text: `Temporal Pre-Trigger & Post-Trigger Sequence (${seq.length} frames captured from up to 10s before trigger—inspect these earlier/later angles to read any vehicle number, license plate, or signage before occlusion):`,
+    });
+
+    for (const idx of sampleIndices) {
+      const fB64 = seq[idx];
+      if (fB64 && fB64 !== imageBase64) {
+        const fUrl = fB64.startsWith("data:") ? fB64 : `data:image/jpeg;base64,${fB64}`;
+        userContent.push({
+          type: "image_url",
+          image_url: { url: fUrl },
+        });
+      }
+    }
+  }
+
+  // When a Custom Pencil or ROI Watch Zone crop is provided, send the masked zone crop
   if (croppedImageBase64) {
     const cropUrl = croppedImageBase64.startsWith("data:")
       ? croppedImageBase64
       : `data:image/jpeg;base64,${croppedImageBase64}`;
     userContent.push({
       type: "text",
-      text: `Strictly masked Watch Zone ROI (all areas outside the Custom Pencil selection are blacked out—evaluate ONLY inside the visible unmasked zone for: "${targetConcept}"):`,
+      text: `Current Trigger Frame — Masked Watch Zone ROI (evaluate strictly for: "${targetConcept}"):`,
     });
     userContent.push({
       type: "image_url",
@@ -191,10 +225,10 @@ Strictly verify ONLY this rule. Is "${targetConcept}" happening right now?`;
           { role: "developer", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        max_tokens: 1000,
+        max_tokens: 2500,
         temperature: 0.1,
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(32_000),
     });
 
     if (res.ok) {
@@ -218,13 +252,23 @@ Strictly verify ONLY this rule. Is "${targetConcept}" happening right now?`;
             summary = `Verified ${targetConcept} on ${cameraName}`;
           }
 
+          const cleanAiText =
+            parsed.detected_text &&
+            String(parsed.detected_text).toLowerCase() !== "null" &&
+            String(parsed.detected_text).toLowerCase() !== "none"
+              ? String(parsed.detected_text).trim()
+              : null;
+          const cleanPlate =
+            parsed.vehicle?.license_plate &&
+            String(parsed.vehicle.license_plate).toLowerCase() !== "null" &&
+            String(parsed.vehicle.license_plate).toLowerCase() !== "none"
+              ? String(parsed.vehicle.license_plate).trim()
+              : null;
+
           const finalDetectedText = needsText
-            ? parsed.detected_text ||
-              (parsed.vehicle?.license_plate && parsed.vehicle.license_plate !== "null"
-                ? parsed.vehicle.license_plate
-                : null) ||
-              detectedOcrText ||
-              null
+            ? cleanPlate && cleanAiText && !cleanAiText.includes(cleanPlate)
+              ? `Plate: ${cleanPlate} | ${cleanAiText}`
+              : cleanPlate || cleanAiText || detectedOcrText || null
             : null;
 
           const hasValidVehicle =
